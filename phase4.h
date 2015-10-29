@@ -11,6 +11,10 @@
 
 #define MAXLINE         80
 
+/* Quantities of Different Devices */
+#define DISK_UNITS 2
+#define TERM_UNITS 4
+
 /*
  * Function prototypes for this phase.
  */
@@ -28,6 +32,18 @@ extern  int  TermWrite(char *buffer, int bufferSize, int unitID,
                        int *numCharsRead);
 
 extern  int  start4(char *);
+
+struct ProcStruct {
+    int pid;
+    int parentPid;
+    int status;
+    int children[MAXPROC];
+    char name[MAXNAME];
+    int procMbox;
+    int (*func)(char *);
+    char *arg;
+    long returnStatus;
+} ProcStruct;
 
 #define ERR_INVALID             -1
 #define ERR_OK                  0
