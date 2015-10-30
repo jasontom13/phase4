@@ -7,8 +7,9 @@
 #include <usyscall.h>
 #include <stdio.h>
 #include <string.h>
+#include <provided_prototypes.h>
+#include <ctype.h>
 
-semaphore 	running;
 
 /* ------------------------- Prototypes ----------------------------------- */
 static int	ClockDriver(char *);
@@ -18,12 +19,14 @@ void diskSize(systemArgs *args);
 void termRead(systemArgs *args);
 void termWrite(systemArgs *args);
 void diskSizeReal(int unitNum, int * sectorSize, int * numSectors, int * numTracks);
-
+void sleep(systemArgs *args);
+void diskRead(systemArgs *args);
+void diskWrite(systemArgs *args);
 
 /* -------------------------- Globals ------------------------------------- */
 struct ProcStruct pFourProcTable[MAXPROC];
+semaphore 	running;
 int debugFlag = 0;
-
 /* ------------------------------------------------------------------------ */
 
 void
@@ -55,8 +58,6 @@ start3(void)
     systemCallVec[SYS_DISKSIZE] = diskSize;
     systemCallVec[SYS_TERMREAD] = diskSize;
     systemCallVec[SYS_TERMWRITE] = diskSize;
-
-
 
     /*
      * Create clock device driver 
@@ -124,8 +125,7 @@ start3(void)
     quit(0);
 }
 
-static int
-ClockDriver(char *arg)
+static int ClockDriver(char *arg)
 {
     int result;
     int status;
@@ -136,15 +136,12 @@ ClockDriver(char *arg)
 
     // Infinite loop until we are zap'd
     while(! isZapped()) {
-	result = waitdevice(USLOSS_CLOCK_DEV, 0, &status);
-	if (result != 0) {
-	    return 0;
+        result = waitdevice(USLOSS_CLOCK_DEV, 0, &status);
+        if (result != 0) {
+            return 0;
+            /* Compute the current time and wake up any processes whose time has come. */
+        }
 	}
-	/*
-	 * Compute the current time and wake up any processes
-	 * whose time has come.
-	 */
-    }
 }
 
 static int
@@ -166,7 +163,7 @@ void diskSize(systemArgs *args){
     }
     if(args->number != SYS_DISKSIZE){
         if (debugFlag){
-            USLOSS_Console("semP(): Attempted to call diskSize with wrong sys call number: %d.\n", args->number);
+            USLOSS_Console("diskSize(): Attempted to call diskSize with wrong sys call number: %d.\n", args->number);
         }
         toUserMode();
         return;
@@ -184,19 +181,104 @@ void diskSize(systemArgs *args){
 }
 
 void diskSizeReal(int unitNum, int * sectorSize, int * numSectors, int * numTracks){
-    
+    if (debugFlag){
+        USLOSS_Console("diskSizeReal(): started.\n");
+    }
     /* Getting numTracks */
     USLOSS_DeviceRequest request;
     request.opr = USLOSS_DISK_TRACKS;
     request.reg1 = numTracks;
     USLOSS_Device_output(USLOSS_DISK_DEV, unitNum, request);
     
+    /* Getting sectorSize */
+    *sectorSize = 512;
     
+    /* Getting numSectors */
+    *numSectors = 16;
+    
+    if (debugFlag){
+        USLOSS_Console("diskSizeReal(): ended.\n");
+    }
     
 }
+    /*
+     Read a line from a terminal (termRead).
+     Input
+     arg1: address of the user’s line buffer.
+     arg2: maximum size of the buffer.
+     arg3: the unit number of the terminal from which to read.
+     Output
+     arg2: number of characters read.
+     arg4: -1 if illegal values are given as input; 0 otherwise.
+     */
+     
 void termRead(systemArgs *args){
+    if (debugFlag){
+        USLOSS_Console("termRead(): started.\n");
+    }
+    if(args->number != SYS_DISKSIZE){
+        if (debugFlag){
+            USLOSS_Console("termRead(): Attempted to call termRead with wrong sys call number: %d.\n", args->number);
+        }
+        toUserMode();
+        return;
+    }
     
 }
 void termWrite(systemArgs *args){
     
 }
+/* ------------------------------------------------------------------------
+   Name		-	sleep
+   Purpose	-
+   Params 	-	a struct of arguments; args[1] contains the number of
+   	   	   	   	seconds the process will sleep
+   Returns	-	placed into 4th position in argument struct; -1 if input
+   Side Effects	-
+   ----------------------------------------------------------------------- */
+void sleep(systemArgs *args){
+	if (debugFlag)
+		USLOSS_Console("sleep(): started.\n");
+	/* verify that the specified interrupt number is correct */
+	if(args->number != SYS_SLEEP){
+		if (debugFlag)
+			USLOSS_Console("sleep(): Attempted a \"sleep\" operation with wrong sys call number: %d.\n", args->number);
+		toUserMode();
+		return;
+	}
+	/* check to make sure that the specified number of seconds is >= 1 and is an integer */
+	if(!isdigit(args->arg1) || args->arg1 < 1){
+		if (debugFlag)
+			USLOSS_Console("sleep(): Invalid number of seconds specified for sleep operation: %d.\n", args->arg1);
+		args->arg4 = -1;
+		toUserMode();
+		return;
+	}
+
+	/* call helper method */
+	args->arg4 = sleepHelper(args->arg1);
+
+}
+
+int sleepHelper(int seconds){
+
+	/* update proc table entry to indicate how many seconds remain on */
+}
+
+/* ------------------------------------------------------------------------
+   Name		-
+   Purpose	-
+   Params 	-	a struct of arguments; args[1] contains
+   Returns	-
+   Side Effects	-
+   ----------------------------------------------------------------------- */
+void diskRead(systemArgs *args);
+
+/* ------------------------------------------------------------------------
+   Name		-
+   Purpose	-
+   Params 	-	a struct of arguments; args[1] contains
+   Returns	-
+   Side Effects	-
+   ----------------------------------------------------------------------- */
+void diskWrite(systemArgs *args);

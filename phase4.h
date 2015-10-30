@@ -17,6 +17,12 @@
 #define DISK_UNITS 2
 #define TERM_UNITS 4
 
+/* proc table object */
+struct ClockDevWaiter{
+	int PID;
+	int secsRemaining;
+};
+
 /*
  * Function prototypes for this phase.
  */
