@@ -19,7 +19,7 @@ void diskWrite(systemArgs *args);
 /* -------------------------- Globals ------------------------------------- */
 struct ProcStruct pFourProcTable[MAXPROC];
 struct clockWaiter clockWaitLine[MAXPROC];
-semaphore 	running;
+int running;
 int debugFlag = 0;
 /* ------------------------------------------------------------------------ */
 
@@ -32,9 +32,7 @@ start3(void)
     int		clockPID;
     int		pid;
     int		status;
-    /*
-     * Check kernel mode here.
-     */
+    /* Check kernel mode here. */
 
 
     /* initialize proctable */
@@ -173,15 +171,15 @@ void sleep(systemArgs *args){
 		toUserMode();
 		return;
 	}
-
-	/* call helper method */
+	/* call helper method and assign return value */
 	args->arg4 = sleepHelper(args->arg1);
-
 }
 
 int sleepHelper(int seconds){
-
-	/* update proc table entry to indicate how many seconds remain on */
+	procStruct * target = pFourProcTable[getPID() % MAXPROC];
+	/* add a new entry to the clockWaiter table */
+	clockWaiterAdd(getPID(), seconds);
+	/* receive on the clockDriver mbox */
 }
 
 /* ------------------------------------------------------------------------
