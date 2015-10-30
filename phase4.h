@@ -18,10 +18,11 @@
 #define TERM_UNITS 4
 
 /* proc table object */
-struct ClockDevWaiter{
+struct clockWaiter{
 	int PID;
 	int secsRemaining;
-};
+	clockWaiter * next;
+}clockWaiter;
 
 /*
  * Function prototypes for this phase.
