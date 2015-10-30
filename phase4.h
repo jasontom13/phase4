@@ -9,6 +9,8 @@
  * Maximum line length
  */
 
+#define INACTIVE		0
+#define ACTIVE			1
 #define MAXLINE         80
 
 /* Quantities of Different Devices */

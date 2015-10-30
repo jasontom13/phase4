@@ -4,6 +4,9 @@
 #include <phase3.h>
 #include <phase4.h>
 #include <stdlib.h> /* needed for atoi() */
+#include <usyscall.h>
+#include <stdio.h>
+#include <string.h>
 
 semaphore 	running;
 
@@ -11,9 +14,15 @@ semaphore 	running;
 static int	ClockDriver(char *);
 static int	DiskDriver(char *);
 static int TermDriver(char *);
+void diskSize(systemArgs *args);
+void termRead(systemArgs *args);
+void termWrite(systemArgs *args);
+void diskSizeReal(int unitNum, int * sectorSize, int * numSectors, int * numTracks);
+
 
 /* -------------------------- Globals ------------------------------------- */
 struct ProcStruct pFourProcTable[MAXPROC];
+int debugFlag = 0;
 
 /* ------------------------------------------------------------------------ */
 
@@ -41,9 +50,11 @@ start3(void)
 
     /* add syscalls to syscallVec */
     systemCallVec[SYS_SLEEP] = sleep;
-    systemCallVec[USLOSS_DISK_READ] = diskRead;
-    systemCallVec[USLOSS_DISK_WRITE] = diskWrite;
-    systemCallVec[USLOSS_DISK_SIZE] = diskSize;
+    systemCallVec[SYS_DISKREAD] = diskRead;
+    systemCallVec[SYS_DISKWRITE] = diskWrite;
+    systemCallVec[SYS_DISKSIZE] = diskSize;
+    systemCallVec[SYS_TERMREAD] = diskSize;
+    systemCallVec[SYS_TERMWRITE] = diskSize;
 
 
 
@@ -71,9 +82,10 @@ start3(void)
      * driver, and perhaps do something with the pid returned.
      */
 
+    char buf[50];
     for (i = 0; i < DISK_UNITS; i++) {
-        sprintf(buf, "%d", i);
-        pid = fork1(strcat("Disk Driver ", itoa(i + 1)), DiskDriver, buf, USLOSS_MIN_STACK, 2);
+        sprintf(buf, "Disk Driver #%d", i);
+        pid = fork1(buf, DiskDriver, NULL, USLOSS_MIN_STACK, 2);
         if (pid < 0) {
             USLOSS_Console("start3(): Can't create disk driver %d\n", i+1);
             USLOSS_Halt(1);
@@ -84,7 +96,8 @@ start3(void)
 
     /* Create terminal device drivers. */
     for(i=0; i < TERM_UNITS; i++){
-    	pid = fork1(strcat("Terminal Driver", itoa(i+1)), TermDriver, NULL, USLOSS_MIN_STACK, 2);
+        sprintf(buf, "Terminal Driver #%d", i);
+    	pid = fork1(buf, TermDriver, NULL, USLOSS_MIN_STACK, 2);
     	if (pid < 0) {
 			USLOSS_Console("start3(): Can't create terminal driver %d\n", i+1);
 			USLOSS_Halt(1);
@@ -118,12 +131,12 @@ ClockDriver(char *arg)
     int status;
 
     // Let the parent know we are running and enable interrupts.
-    semvReal(running);
+    semVReal(running);
     USLOSS_PsrSet(USLOSS_PsrGet() | USLOSS_PSR_CURRENT_INT);
 
     // Infinite loop until we are zap'd
-    while(! is_zapped()) {
-	result = waitdevice(CLOCK_DEV, 0, &status);
+    while(! isZapped()) {
+	result = waitdevice(USLOSS_CLOCK_DEV, 0, &status);
 	if (result != 0) {
 	    return 0;
 	}
@@ -145,4 +158,45 @@ static int TermDriver(char * arg){
 
 	return 0;
 
+}
+
+void diskSize(systemArgs *args){
+    if (debugFlag){
+        USLOSS_Console("diskSize(): started.\n");
+    }
+    if(args->number != SYS_DISKSIZE){
+        if (debugFlag){
+            USLOSS_Console("semP(): Attempted to call diskSize with wrong sys call number: %d.\n", args->number);
+        }
+        toUserMode();
+        return;
+    }
+    int unitNum = args->arg1;
+    int sectorSize;
+    int numTracks;
+    int numSectors;
+    
+    diskSizeReal(unitNum, &sectorSize, &numSectors, &numTracks);
+    
+    args->arg1 = sectorSize;
+    args->arg2 = numSectors;
+    args->arg3 = numTracks;
+}
+
+void diskSizeReal(int unitNum, int * sectorSize, int * numSectors, int * numTracks){
+    
+    /* Getting numTracks */
+    USLOSS_DeviceRequest request;
+    request.opr = USLOSS_DISK_TRACKS;
+    request.reg1 = numTracks;
+    USLOSS_Device_output(USLOSS_DISK_DEV, unitNum, request);
+    
+    
+    
+}
+void termRead(systemArgs *args){
+    
+}
+void termWrite(systemArgs *args){
+    
 }
