@@ -18,6 +18,7 @@ void diskWrite(systemArgs *args);
 
 /* -------------------------- Globals ------------------------------------- */
 struct ProcStruct pFourProcTable[MAXPROC];
+struct clockWaiter clockWaitLine[MAXPROC];
 semaphore 	running;
 int debugFlag = 0;
 /* ------------------------------------------------------------------------ */
