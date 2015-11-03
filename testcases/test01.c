@@ -22,8 +22,9 @@ int Child(char *arg)
    GetTimeofDay(&tod1);
    Sleep(seconds);
    GetTimeofDay(&tod2);
-   USLOSS_Console("Child%d(): After sleeping %d seconds, diff in sys_clock is %d\n",
-           my_num, seconds,tod2-tod1);
+   USLOSS_Console("Child%d(): After sleeping %d seconds, difference ",
+                  my_num, seconds);
+   USLOSS_Console("in system clock is %d\n", tod2-tod1);
 
   Terminate(10 + my_num);
 
