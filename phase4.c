@@ -26,8 +26,11 @@ void diskWrite(systemArgs *args);
 /* -------------------------- Globals ------------------------------------- */
 struct ProcStruct pFourProcTable[MAXPROC];
 struct clockWaiter clockWaitLine[MAXPROC];
+struct clockWaiter * clockWaiterHead;
+struct clockWaiter * clockWaiterTail;
 int running;
 int debugFlag = 0;
+
 /* ------------------------------------------------------------------------ */
 
 void
@@ -41,7 +44,6 @@ start3(void)
     int		status;
     /* Check kernel mode here. */
 
-
     /* initialize proctable */
     for(i = getpid(); i < MAXPROC; i++){
     	pFourProcTable[i].status = INACTIVE;
@@ -49,6 +51,13 @@ start3(void)
     	pFourProcTable[i].parentPid=-1;
 		memset(pFourProcTable[i].children, INACTIVE, sizeof(pFourProcTable[i].children));
     }
+    /* initialize clockWaitLine */
+    for(i = 0; i < MAXPROC; i++){
+    	clockWaitLine[i].PID = -1;
+    }
+    /* set the head and the tail */
+    clockWaiterHead = NULL;
+    clockWaiterTail = NULL;
 
     /* add syscalls to syscallVec */
     systemCallVec[SYS_SLEEP] = sleep;
@@ -119,6 +128,8 @@ start3(void)
      * Zap the device drivers
      */
     zap(clockPID);  // clock driver
+    zap() // 1st disk driver
+    zap() //
 
     // eventually, at the end:
     quit(0);
@@ -139,8 +150,17 @@ static int ClockDriver(char *arg)
         if (result != 0) {
             return 0;
             /* Compute the current time and wake up any processes whose time has come. */
+			int timeNow = gettimeofdayReal();
+			char msg[50];
+			int temp;
+			for(; clockWaiterHead != NULL && clockWaiterHead->secsRemaining <= timeNow; clockWaiterHead = clockWaiterHead->next){
+				MboxCondSend(clockWaiterHead->PID, msg, 0);
+				clockWaiterHead->PID = -1;
+			}
         }
 	}
+    // Once Zapped, call quit
+    quit(0);
 }
 
 static int
@@ -238,6 +258,7 @@ void termWrite(systemArgs *args){
 void sleep(systemArgs *args){
 	if (debugFlag)
 		USLOSS_Console("sleep(): started.\n");
+	int reply = 0;
 	/* verify that the specified interrupt number is correct */
 	if(args->number != SYS_SLEEP){
 		if (debugFlag)
@@ -249,19 +270,62 @@ void sleep(systemArgs *args){
 	if(!isdigit(args->arg1) || args->arg1 < 1){
 		if (debugFlag)
 			USLOSS_Console("sleep(): Invalid number of seconds specified for sleep operation: %d.\n", args->arg1);
-		args->arg4 = -1;
-		toUserMode();
-		return;
+		reply = -1;
 	}
 	/* call helper method and assign return value */
-	args->arg4 = sleepHelper(args->arg1);
+	else
+		sleepHelper(args->arg1);
+	args->arg4 = &reply;
+	toUserMode();
+	return;
 }
 
-int sleepHelper(int seconds){
-	procStruct * target = pFourProcTable[getPID() % MAXPROC];
+void sleepHelper(int seconds){
+	struct ProcStruct * target = pFourProcTable[getPID() % MAXPROC];
+	char msg[50];
+
 	/* add a new entry to the clockWaiter table */
 	clockWaiterAdd(getPID(), seconds);
 	/* receive on the clockDriver mbox */
+	MboxReceive(target->procMbox, msg, 0);
+}
+
+// a helper method which adds a clockWaiter object onto the queue
+void clockWaiterAdd(int pid, int seconds){
+	/* compute the wake up time for the process */
+	int wakeUpTime = getTimeOfDayReal() + seconds;
+	/* place the process in the wait line */
+	clockWaitLine[getpid() % MAXPROC].PID = getpid();
+	struct clockWaiter * position = *clockWaitLine[getpid() % MAXPROC];
+	/* if there are no current waiting processes place at head of queue */
+	if(clockWaiterHead == NULL){
+		clockWaiterHead = position;
+	}
+	/* if the current process's wait time is shorter than the head proc's
+	 * waiting time, place the new proc at the head */
+	else if(clockWaiterHead->secsRemaining >= position->secsRemaining){
+		position->next = clockWaiterHead;
+		clockWaiterHead = position;
+	}
+	/* if there is only one current process in the queue, place the new proc
+	 * at the end of the queue */
+	else if(clockWaiterTail == NULL){
+		clockWaiterHead->next = position;
+		clockWaiterTail = position;
+	}
+	/* if the current proc's wait time is greater than the tail proc's wait
+	 * time, place the current proc at the tail */
+	else if(clockWaiterTail->secsRemaining <= position->secsRemaining){
+		position->next = clockWaiterTail;
+		clockWaiterTail = position;
+	}
+	/* base case: locate the proper position for the current process and insert */
+	else{
+		struct clockWaiter * counter = clockWaiterHead;
+		for(; counter->next->secsRemaining < position->secsRemaining; counter = counter->next);
+		position->next = counter->next;
+		counter->next = position;
+	}
 }
 
 /* ------------------------------------------------------------------------

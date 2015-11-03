@@ -21,7 +21,7 @@
 struct clockWaiter{
 	int PID;
 	int secsRemaining;
-	clockWaiter * next;
+	struct clockWaiter * next;
 }clockWaiter;
 
 /*
