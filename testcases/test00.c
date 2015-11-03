@@ -21,7 +21,8 @@ int Child(char *arg)
     time = end - begin;
     time = ABS(10000000, time);
     if (time > 1000000) {
-        USLOSS_Console("Child%d(): Sleep bad: %d %d\n", me, time, ABS(10000000, time));
+        USLOSS_Console("Child%d(): Sleep bad: %d %d\n",
+                       me, time, ABS(10000000, time));
     }
     else {
         USLOSS_Console("Child%d(): Sleep done at time %d\n", me, end);
