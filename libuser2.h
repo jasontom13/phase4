@@ -13,6 +13,8 @@
 
 extern int TermRead(char * buffer, int maxLen, int unitNum, int *length);
 extern int TermWrite(char * buffer, int strlen, int unitNum, int *length);
+extern int DiskRead(void *diskBuffer, int unit, int track, int first, int sectors, int *status);
+extern int DiskWrite(void *diskBuffer, int unit, int track, int first, int sectors, int *status);
 
 
 //extern int  Spawn(char *name, int (*func)(char *), char *arg, int stack_size,

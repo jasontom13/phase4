@@ -128,8 +128,8 @@ start3(void)
      * Zap the device drivers
      */
     zap(clockPID);  // clock driver
-    zap() // 1st disk driver
-    zap() //
+    zap(); // 1st disk driver
+    zap(); //
 
     // eventually, at the end:
     quit(0);
@@ -146,27 +146,36 @@ static int ClockDriver(char *arg)
 
     // Infinite loop until we are zap'd
     while(! isZapped()) {
-        result = waitdevice(USLOSS_CLOCK_DEV, 0, &status);
-        if (result != 0) {
+        result = waitDevice(USLOSS_CLOCK_DEV, 0, &status);
+        if (result != 0)
             return 0;
-            /* Compute the current time and wake up any processes whose time has come. */
-			int timeNow = gettimeofdayReal();
-			char msg[50];
-			int temp;
-			for(; clockWaiterHead != NULL && clockWaiterHead->secsRemaining <= timeNow; clockWaiterHead = clockWaiterHead->next){
-				MboxCondSend(clockWaiterHead->PID, msg, 0);
-				clockWaiterHead->PID = -1;
-			}
-        }
+		/* Compute the current time and wake up any processes whose time has come. */
+		int timeNow = gettimeofdayReal();
+		char msg[50];
+		int temp;
+		for(; clockWaiterHead != NULL && clockWaiterHead->secsRemaining <= timeNow; clockWaiterHead = clockWaiterHead->next){
+			MboxCondSend(clockWaiterHead->PID, msg, 0);
+			clockWaiterHead->PID = -1;
+		}
 	}
     // Once Zapped, call quit
     quit(0);
 }
 
-static int
-DiskDriver(char *arg)
+static int DiskDriver(char *arg)
 {
+	int result, status;
     int unit = atoi( (char *) arg); 	// Unit is passed as arg.
+    // infinite loop until the disk proc is zapped!
+    while(! isZapped()){
+    	result = waitDevice(USLOSS_DISK_DEV, unit, &status);
+    	if (result != 0)
+    		return 0;
+    	if(status & SYS_DISKREAD)
+    		DiskRead()
+    }
+
+
     return 0;
 }
 
@@ -335,12 +344,10 @@ int termWriteReal(char * address, int numChars, int unitNum){
     
 }
 
-
-
-
 /* ------------------------------------------------------------------------
    Name		-	sleep
-   Purpose	-
+   Purpose	-   puts a process to sleep for a number of seconds specified
+                by the user
    Params 	-	a struct of arguments; args[1] contains the number of
    	   	   	   	seconds the process will sleep
    Returns	-	placed into 4th position in argument struct; -1 if input
@@ -420,13 +427,45 @@ void clockWaiterAdd(int pid, int seconds){
 }
 
 /* ------------------------------------------------------------------------
-   Name		-
-   Purpose	-
-   Params 	-	a struct of arguments; args[1] contains
-   Returns	-
-   Side Effects	-
+   Name		-	diskRead
+   Purpose	-	reads n sectors from specified disk
+   Params 	-	a struct of arguments
+   Returns	-	none; places
+   Side Effects	- none
    ----------------------------------------------------------------------- */
-void diskRead(systemArgs *args);
+void diskRead(systemArgs *args){
+	// if any of the arguments passed have illegal values, set arg4 to -1 and return
+	if(args->arg1 <= 0 || args->arg2 < 1 || args->arg3 < 0 || args->arg4 < 0 || args->arg5 < 0){
+		args->arg4 = -1;
+		return;
+	}
+	// read the information from the unit
+	int reply = diskReadReal(args->arg5, args->arg3, args->arg4, args->arg2, args->arg1);
+	// if the return value is
+}
+/* sysArg.arg1 = diskBuffer;
+	sysArg.arg2 = sectors;
+	sysArg.arg3 = track;
+	sysArg.arg4 = first;
+	sysArg.arg5 = unit;
+	*/
+
+/* ------------------------------------------------------------------------
+   Name		-   diskReadReal
+   Purpose	-   Reads sectors sectors from the disk indicated by unit,
+                starting at track track and sector first . The sectors are
+                copied into buffer.
+   Params 	-   int unit, int track, int first sector, int number of sectors,
+                void * buffer to read into
+   Returns	-   -1: invalid parameters; 0: sectors were read successfully;
+                >0: disk’s status register
+   Side Effects	- none
+   ----------------------------------------------------------------------- */
+
+int diskReadReal(int unit, int track, int first, int sectors, void *buffer){
+	// verify that disk device is ready to be read from
+	if(())
+}
 
 /* ------------------------------------------------------------------------
    Name		-
@@ -436,3 +475,7 @@ void diskRead(systemArgs *args);
    Side Effects	-
    ----------------------------------------------------------------------- */
 void diskWrite(systemArgs *args);
+
+int diskWriteReal(int unit, int track, int first, int sectors, void *buffer){
+
+}

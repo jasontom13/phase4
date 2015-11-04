@@ -33,4 +33,34 @@ int TermWrite(char * buffer, int strlen, int unitNum, int *length){
     USLOSS_Syscall(&sysArg);
     *length = (int) sysArg.arg2;
     return (int) sysArg.arg4;
+}USLOSS_Syscall(&sysArg);
+
+int DiskRead(void *diskBuffer, int unit, int track, int first, int sectors, int *status){
+	// populate the sysargs struct;
+	systemArgs sysArg;
+	sysArg.number = SYS_DISKREAD;
+	sysArg.arg1 = diskBuffer;
+	sysArg.arg2 = sectors;
+	sysArg.arg3 = track;
+	sysArg.arg4 = first;
+	sysArg.arg5 = unit;
+	// execute the syscall
+	USLOSS_Syscall(&sysArg);
+	*status = (int)sysArg.arg1;
+	return (int) sysArg.arg4;
+}
+
+int DiskWrite(void *diskBuffer, int unit, int track, int first, int sectors, int *status){
+	// populate the sysargs struct;
+	systemArgs sysArg;
+	sysArg.number = SYS_DISKREAD;
+	sysArg.arg1 = diskBuffer;
+	sysArg.arg2 = sectors;
+	sysArg.arg3 = track;
+	sysArg.arg4 = first;
+	sysArg.arg5 = unit;
+	// execute the syscall
+	USLOSS_Syscall(&sysArg);
+	*status = (int)sysArg.arg1;
+	return (int) sysArg.arg4;
 }
