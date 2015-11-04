@@ -24,6 +24,7 @@ void diskRead(systemArgs *args);
 void diskWrite(systemArgs *args);
 
 /* -------------------------- Globals ------------------------------------- */
+struct Terminal terminals[USLOSS_MAX_UNITS];
 struct ProcStruct pFourProcTable[MAXPROC];
 struct clockWaiter clockWaitLine[MAXPROC];
 struct clockWaiter * clockWaiterHead;
@@ -106,7 +107,7 @@ start3(void)
     /* Create terminal device drivers. */
     for(i=0; i < TERM_UNITS; i++){
         sprintf(buf, "Terminal Driver #%d", i);
-    	pid = fork1(buf, TermDriver, NULL, USLOSS_MIN_STACK, 2);
+    	pid = fork1(buf, TermDriver, (i+'0'), USLOSS_MIN_STACK, 2);
     	if (pid < 0) {
 			USLOSS_Console("start3(): Can't create terminal driver %d\n", i+1);
 			USLOSS_Halt(1);
@@ -179,12 +180,6 @@ static int DiskDriver(char *arg)
     return 0;
 }
 
-static int TermDriver(char * arg){
-
-	return 0;
-
-}
-
 void diskSize(systemArgs *args){
     if (debugFlag){
         USLOSS_Console("diskSize(): started.\n");
@@ -229,6 +224,70 @@ void diskSizeReal(int unitNum, int * sectorSize, int * numSectors, int * numTrac
     }
     
 }
+
+static int TermDriver(char * arg){
+    int status;
+    int unit = atoi( (char *) arg);
+    int inBox;
+    int outBox;
+    int bufferBox;
+    inBox = MboxCreate(1, MAX_MESSAGE);
+    outBox = MboxCreate(1, MAX_MESSAGE);
+    bufferBox = MboxCreate(10, MAX_MESSAGE);
+    terminals[unit].pid = getpid();
+    terminals[unit].inBox = inBox;
+    terminals[unit].outBox = outBox;
+    terminals[unit].bufferBox = bufferBox;
+    
+    while(!isZapped()){
+        waitDevice(USLOSS_TERM_DEV, unit ,&status);
+        // If received char, send to char in Box
+        if(USLOSS_TERM_STAT_RECV(status) == USLOSS_DEV_BUSY){
+            MboxSend(terminals[unit].inBox, USLOSS_TERM_STAT_CHAR(status), 1);
+        }
+        // If sent char, send result to char out Box
+        
+    }
+    
+    return 0;
+    
+}
+
+void TermReader(char * arg){
+    int unit = atoi( (char *) arg);
+    char msg[MAXLINE];
+    int i=0;
+    int charsRead = 0;
+    char temp;
+    
+    // Get the full line from mailBox
+    while(1){
+        while(1){
+            MboxReceive(terminals[unit].inBox, temp, 1);
+            if (charsRead >= MAXLINE){
+                break;
+            }
+            else if(temp == '\n'){
+                msg[i] = temp;
+                i++;
+                break;
+            }
+            msg[i] = temp;
+            i++;
+            charsRead++;
+        }
+        msg[i]='\0';
+        if(debugFlag){
+            USLOSS_Console("termReadReal(): finished reading line: ");
+            int j = 0;
+            for(j=0;j<strlen(msg);j++){
+                USLOSS_Console("%c", msg[j]);
+            }
+            USLOSS_Console("\n");
+        }
+        MboxSend(terminals[unit].bufferBox, msg, charsRead);
+    }
+}
     /*
      Read a line from a terminal (termRead).
      Input
@@ -257,6 +316,12 @@ void termRead(systemArgs *args){
     address = (char *)args->arg1;
     maxSize = (int)args->arg2;
     unitNum = (int)args->arg3;
+    
+    // Check unit number validity and line length validity
+    if(unitNum > USLOSS_MAX_UNITS-1 || maxSize > MAXLINE){
+        args->arg4 = -1;
+    }
+    
     int charsRead;
     charsRead = termReadReal(address, maxSize, unitNum);
     args -> arg2 = charsRead;
@@ -264,45 +329,71 @@ void termRead(systemArgs *args){
 }
 
 int termReadReal(char * address, int maxSize, int unitNum){
-    int status;
-    char msg[maxSize];
     int i=0;
     int charsRead = 0;
-    // Get the full line from terminal
-    while(1){
-        USLOSS_DeviceInput(USLOSS_TERM_DEV, unitNum, &status);
-        // If there is a character waiting
-        if(USLOSS_TERM_STAT_RECV(status) == USLOSS_DEV_BUSY){
-            msg[i] = USLOSS_TERM_STAT_CHAR(status);
-            i++;
-            if (USLOSS_TERM_STAT_CHAR(status) == '\n' || USLOSS_TERM_STAT_CHAR(status) == '\0'){
-                break;
-            }
-            else{
-                charsRead++;
-            }
-        }
-        else if (USLOSS_TERM_STAT_RECV(status) == USLOSS_DEV_READY){
-            continue;
+    
+    char * msg;
+    char * temp;
+    temp = msg;
+    MboxReceive(terminals[unitNum].bufferBox, msg, maxSize);
+    
+    for(i=0;i<maxSize; i++){
+        if(*temp!='\n'){
+            charsRead++;
         }
         else{
-            if(debugFlag){
-                USLOSS_Console("termReadReal(): Error in USLOSS_DeviceInput getting character.\n");
-            }
+            break;
         }
+        temp++;
     }
-    if(debugFlag){
-        USLOSS_Console("termReadReal(): finished reading line: ");
-        int j = 0;
-        for(j=0;j<strlen(msg);j++){
-            USLOSS_Console("%c", msg[j]);
-        }
-        USLOSS_Console("\n");
-        
-    }
-    msg[i] = '\0';
+    
+    strcat("\n", msg);
     strcpy(address, msg);
+    
     return charsRead;
+    
+    
+//    // Get the full line from terminal
+//    while(1){
+//        if (charsRead >= maxSize){
+//            if(debugFlag){
+//                USLOSS_Console("termReadReal(): The line is longer than the maximum allowed characters.\n");
+//            }
+//            break;
+//        }
+//        USLOSS_DeviceInput(USLOSS_TERM_DEV, unitNum, &status);
+//        // If there is a character waiting
+//        if(USLOSS_TERM_STAT_RECV(status) == USLOSS_DEV_BUSY){
+//            msg[i] = USLOSS_TERM_STAT_CHAR(status);
+//            i++;
+//            if (USLOSS_TERM_STAT_CHAR(status) == '\n' || USLOSS_TERM_STAT_CHAR(status) == '\0'){
+//                break;
+//            }
+//            else{
+//                charsRead++;
+//            }
+//        }
+//        else if (USLOSS_TERM_STAT_RECV(status) == USLOSS_DEV_READY){
+//            continue;
+//        }
+//        else{
+//            if(debugFlag){
+//                USLOSS_Console("termReadReal(): Error in USLOSS_DeviceInput getting character.\n");
+//            }
+//        }
+//    }
+//    if(debugFlag){
+//        USLOSS_Console("termReadReal(): finished reading line: ");
+//        int j = 0;
+//        for(j=0;j<strlen(msg);j++){
+//            USLOSS_Console("%c", msg[j]);
+//        }
+//        USLOSS_Console("\n");
+//        
+//    }
+//    msg[i] = '\0';
+//    strcpy(address, msg);
+    
     
 }
 /*

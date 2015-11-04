@@ -54,6 +54,13 @@ struct ProcStruct {
     long returnStatus;
 } ProcStruct;
 
+struct Terminal {
+    int pid;
+    int inBox;
+    int outBox;
+    int bufferBox;
+} Terminal;
+
 #define ERR_INVALID             -1
 #define ERR_OK                  0
 
