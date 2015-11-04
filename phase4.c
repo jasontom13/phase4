@@ -128,9 +128,9 @@ start3(void)
     /*
      * Zap the device drivers
      */
-    zap(clockPID);  // clock driver
-    zap(); // 1st disk driver
-    zap(); //
+    // zap(clockPID);  // clock driver
+    // zap(); // 1st disk driver
+    // zap(); //
 
     // eventually, at the end:
     quit(0);
@@ -142,7 +142,7 @@ static int ClockDriver(char *arg)
     int status;
 
     // Let the parent know we are running and enable interrupts.
-    semVReal(running);
+    semvReal(running);
     USLOSS_PsrSet(USLOSS_PsrGet() | USLOSS_PSR_CURRENT_INT);
 
     // Infinite loop until we are zap'd
@@ -151,7 +151,8 @@ static int ClockDriver(char *arg)
         if (result != 0)
             return 0;
 		/* Compute the current time and wake up any processes whose time has come. */
-		int timeNow = gettimeofdayReal();
+		int timeNow;
+		gettimeofdayReal(&timeNow);
 		char msg[50];
 		int temp;
 		for(; clockWaiterHead != NULL && clockWaiterHead->secsRemaining <= timeNow; clockWaiterHead = clockWaiterHead->next){
@@ -173,7 +174,7 @@ static int DiskDriver(char *arg)
     	if (result != 0)
     		return 0;
     	if(status & SYS_DISKREAD)
-    		DiskRead()
+    		DiskRead();
     }
 
 
@@ -470,7 +471,7 @@ void sleep(systemArgs *args){
 }
 
 void sleepHelper(int seconds){
-	struct ProcStruct * target = pFourProcTable[getPID() % MAXPROC];
+	struct ProcStruct * target = &pFourProcTable[getPID() % MAXPROC];
 	char msg[50];
 
 	/* add a new entry to the clockWaiter table */
@@ -485,7 +486,7 @@ void clockWaiterAdd(int pid, int seconds){
 	int wakeUpTime = getTimeOfDayReal() + seconds;
 	/* place the process in the wait line */
 	clockWaitLine[getpid() % MAXPROC].PID = getpid();
-	struct clockWaiter * position = *clockWaitLine[getpid() % MAXPROC];
+	struct clockWaiter * position = &clockWaitLine[getpid() % MAXPROC];
 	/* if there are no current waiting processes place at head of queue */
 	if(clockWaiterHead == NULL){
 		clockWaiterHead = position;
