@@ -33,7 +33,7 @@ int TermWrite(char * buffer, int strlen, int unitNum, int *length){
     USLOSS_Syscall(&sysArg);
     *length = (int) sysArg.arg2;
     return (int) sysArg.arg4;
-}USLOSS_Syscall(&sysArg);
+}
 
 int DiskRead(void *diskBuffer, int unit, int track, int first, int sectors, int *status){
 	// populate the sysargs struct;

@@ -15,6 +15,8 @@
 static int	ClockDriver(char *);
 static int	DiskDriver(char *);
 static int TermDriver(char *);
+static int TermReader(char *);
+static int TermWriter(char *);
 void diskSize(systemArgs *args);
 void termRead(systemArgs *args);
 void termWrite(systemArgs *args);
@@ -68,8 +70,8 @@ start3(void)
     systemCallVec[SYS_DISKREAD] = diskRead;
     systemCallVec[SYS_DISKWRITE] = diskWrite;
     systemCallVec[SYS_DISKSIZE] = diskSize;
-    systemCallVec[SYS_TERMREAD] = diskSize;
-    systemCallVec[SYS_TERMWRITE] = diskSize;
+    systemCallVec[SYS_TERMREAD] = termRead;
+    systemCallVec[SYS_TERMWRITE] = termWrite;
 
     /*
      * Create clock device driver 
@@ -108,13 +110,25 @@ start3(void)
     sempReal(running);
 
     /* Create terminal device drivers. */
-    for(i=0; i < TERM_UNITS; i++){
+    for(i=0; i < USLOSS_TERM_UNITS; i++){
         sprintf(buf, "Terminal Driver #%d", i);
-    	pid = fork1(buf, TermDriver, (i+'0'), USLOSS_MIN_STACK, 2);
+    	pid = fork1(buf, TermDriver, i+1, USLOSS_MIN_STACK, 2);
     	if (pid < 0) {
 			USLOSS_Console("start3(): Can't create terminal driver %d\n", i+1);
 			USLOSS_Halt(1);
 		}
+        sprintf(buf, "Terminal Reader #%d", i);
+        pid = fork1(buf, TermReader, i+1, USLOSS_MIN_STACK, 2);
+        if (pid < 0) {
+            USLOSS_Console("start3(): Can't create terminal reader %d\n", i+1);
+            USLOSS_Halt(1);
+        }
+        sprintf(buf, "Terminal Writer #%d", i);
+        pid = fork1(buf, TermWriter, i+1, USLOSS_MIN_STACK, 2);
+        if (pid < 0) {
+            USLOSS_Console("start3(): Can't create terminal writer %d\n", i+1);
+            USLOSS_Halt(1);
+        }
     }
 
 
@@ -402,13 +416,18 @@ static int TermDriver(char * arg){
     int inBox;
     int outBox;
     int bufferBox;
+    int writeBox;
+    int mutexBox;
+    mutexBox = MboxCreate(1, MAXLINE);
     inBox = MboxCreate(1, MAX_MESSAGE);
     outBox = MboxCreate(1, MAX_MESSAGE);
     bufferBox = MboxCreate(10, MAX_MESSAGE);
+    writeBox = MboxCreate(1, MAXLINE);
     terminals[unit].pid = getpid();
     terminals[unit].inBox = inBox;
     terminals[unit].outBox = outBox;
     terminals[unit].bufferBox = bufferBox;
+    terminals[unit].mutexBox = mutexBox;
     
     while(!isZapped()){
         waitDevice(USLOSS_TERM_DEV, unit ,&status);
@@ -417,14 +436,16 @@ static int TermDriver(char * arg){
             MboxSend(terminals[unit].inBox, USLOSS_TERM_STAT_CHAR(status), 1);
         }
         // If sent char, send result to char out Box
-        
+        if(USLOSS_TERM_STAT_XMIT(status) == USLOSS_DEV_READY){
+            MboxSend(terminals[unit].outBox, USLOSS_TERM_STAT_CHAR(status), 1);
+        }
     }
     
     return 0;
     
 }
 
-void TermReader(char * arg){
+static int TermReader(char * arg){
     int unit = atoi( (char *) arg);
     char msg[MAXLINE];
     int i=0;
@@ -500,6 +521,14 @@ void termRead(systemArgs *args){
 }
 
 int termReadReal(char * address, int maxSize, int unitNum){
+    
+    if(unitNum>USLOSS_MAX_UNITS ){
+        if (debugFlag){
+            USLOSS_Console("termReadReal(): Tried to use terminal outside of max units. # %d\n", unitNum);
+        }
+        return -1;
+    }
+    
     int i=0;
     int charsRead = 0;
     
@@ -567,6 +596,67 @@ int termReadReal(char * address, int maxSize, int unitNum){
     
     
 }
+
+static int TermWriter(char * arg){
+    
+    int unit = atoi( (char *) arg);
+    char msg[MAXLINE];
+    int i=0;
+    char * line;
+    int charsWritten = 0;
+    
+    while(1){
+        MboxReceive(terminals[unit].writeBox, line, MAXLINE);
+        // Setting the xmit int enable bit
+        int control = 0;
+        USLOSS_TERM_CTRL_XMIT_INT(control);
+        USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, control);
+        char temp;
+        while(1){
+            MboxReceive(terminals[unit].outBox, temp, MAXLINE);
+            USLOSS_TERM_CTRL_CHAR(control, *line);
+            USLOSS_TERM_CTRL_XMIT_CHAR(control);
+            if( *line=='\n' || *line == '\0'){
+                if(debugFlag){
+                    USLOSS_Console("TermWriter(): Reached end of string for write.\n");
+                }
+                break;
+            }
+            line++;
+            charsWritten++;
+        }
+        USLOSS_TERM_CTRL_XMIT_DISABLE(control);
+        MboxSend(terminals[unit].mutexBox, charsWritten, 1);
+    }  
+//    // Get the full line from mailBox
+//    while(1){
+//        while(1){
+//            MboxReceive(terminals[unit].writeBox, temp, 1);
+//            if (charsRead >= MAXLINE){
+//                break;
+//            }
+//            else if(temp == '\n'){
+//                msg[i] = temp;
+//                i++;
+//                break;
+//            }
+//            msg[i] = temp;
+//            i++;
+//            charsRead++;
+//        }
+//        msg[i]='\0';
+//        if(debugFlag){
+//            USLOSS_Console("termReadReal(): finished reading line: ");
+//            int j = 0;
+//            for(j=0;j<strlen(msg);j++){
+//                USLOSS_Console("%c", msg[j]);
+//            }
+//            USLOSS_Console("\n");
+//        }
+    
+    
+}
+
 /*
  Write a line to a terminal (termWrite).
  Input
@@ -603,5 +693,16 @@ void termWrite(systemArgs *args){
 }
 
 int termWriteReal(char * address, int numChars, int unitNum){
+    
+    if(unitNum>USLOSS_MAX_UNITS ){
+        if (debugFlag){
+            USLOSS_Console("termWriteReal(): Tried to use terminal outside of max units. # %d\n", unitNum);
+        }
+        return -1;
+    }
+    MboxSend(terminals[unitNum].writeBox, address, numChars);
+    int charsWritten;
+    MboxReceive(terminals[unitNum].mutexBox, charsWritten, 1);
+    return charsWritten;
     
 }

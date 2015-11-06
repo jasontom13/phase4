@@ -59,6 +59,8 @@ struct Terminal {
     int inBox;
     int outBox;
     int bufferBox;
+    int writeBox;
+    int mutexBox;
 } Terminal;
 
 struct diskWaiter {
