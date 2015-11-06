@@ -61,6 +61,15 @@ struct Terminal {
     int bufferBox;
 } Terminal;
 
+struct diskWaiter {
+	int pid;
+	int type;      // use usloss disk operation macros
+	int track;     // specifies the track on which to read/write
+	int first;     // first sector to read
+	int sectors;   // number of sectors to read
+	void *buffer   // address of the buffer to which to read
+} diskProc;
+
 #define ERR_INVALID             -1
 #define ERR_OK                  0
 

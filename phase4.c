@@ -27,8 +27,11 @@ void diskWrite(systemArgs *args);
 struct Terminal terminals[USLOSS_MAX_UNITS];
 struct ProcStruct pFourProcTable[MAXPROC];
 struct clockWaiter clockWaitLine[MAXPROC];
+struct Disk diskOne;
+struct Disk diskTwo;
 struct clockWaiter * clockWaiterHead;
 struct clockWaiter * clockWaiterTail;
+struct USLOSS_DeviceRequest diskRW;
 int running;
 int debugFlag = 0;
 
@@ -164,21 +167,188 @@ static int ClockDriver(char *arg)
     quit(0);
 }
 
+/* ------------------------------------------------------------------------
+   Name		-	sleep
+   Purpose	-   puts a process to sleep for a number of seconds specified
+                by the user
+   Params 	-	a struct of arguments; args[1] contains the number of
+   	   	   	   	seconds the process will sleep
+   Returns	-	placed into 4th position in argument struct; -1 if input
+   Side Effects	-
+   ----------------------------------------------------------------------- */
+void sleep(systemArgs *args){
+	if (debugFlag)
+		USLOSS_Console("sleep(): started.\n");
+	int reply = 0;
+	/* verify that the specified interrupt number is correct */
+	if(args->number != SYS_SLEEP){
+		if (debugFlag)
+			USLOSS_Console("sleep(): Attempted a \"sleep\" operation with wrong sys call number: %d.\n", args->number);
+		toUserMode();
+		return;
+	}
+	/* check to make sure that the specified number of seconds is >= 1 and is an integer */
+	if(!isdigit(args->arg1) || args->arg1 < 1){
+		if (debugFlag)
+			USLOSS_Console("sleep(): Invalid number of seconds specified for sleep operation: %d.\n", args->arg1);
+		reply = -1;
+	}
+	/* call helper method and assign return value */
+	else
+		sleepHelper(args->arg1);
+	args->arg4 = &reply;
+	toUserMode();
+	return;
+}
+
+void sleepHelper(int seconds){
+	struct ProcStruct * target = &pFourProcTable[getPID() % MAXPROC];
+	char msg[50];
+
+	/* add a new entry to the clockWaiter table */
+	clockWaiterAdd(getPID(), seconds);
+	/* receive on the clockDriver mbox */
+	MboxReceive(target->procMbox, msg, 0);
+}
+
+// a helper method which adds a clockWaiter object onto the queue
+void clockWaiterAdd(int pid, int seconds){
+	/* compute the wake up time for the process */
+	int wakeUpTime = getTimeOfDayReal() + seconds;
+	/* place the process in the wait line */
+	clockWaitLine[getpid() % MAXPROC].PID = getpid();
+	struct clockWaiter * position = &clockWaitLine[getpid() % MAXPROC];
+	/* if there are no current waiting processes place at head of queue */
+	if(clockWaiterHead == NULL){
+		clockWaiterHead = position;
+	}
+	/* if the current process's wait time is shorter than the head proc's
+	 * waiting time, place the new proc at the head */
+	else if(clockWaiterHead->secsRemaining >= position->secsRemaining){
+		position->next = clockWaiterHead;
+		clockWaiterHead = position;
+	}
+	/* if there is only one current process in the queue, place the new proc
+	 * at the end of the queue */
+	else if(clockWaiterTail == NULL){
+		clockWaiterHead->next = position;
+		clockWaiterTail = position;
+	}
+	/* if the current proc's wait time is greater than the tail proc's wait
+	 * time, place the current proc at the tail */
+	else if(clockWaiterTail->secsRemaining <= position->secsRemaining){
+		position->next = clockWaiterTail;
+		clockWaiterTail = position;
+	}
+	/* base case: locate the proper position for the current process and insert */
+	else{
+		struct clockWaiter * counter = clockWaiterHead;
+		for(; counter->next->secsRemaining < position->secsRemaining; counter = counter->next);
+		position->next = counter->next;
+		counter->next = position;
+	}
+}
+
+/* ------------------------------------------------------------------------
+   Name		-	DiskDriver
+   Purpose	-	coordinates read/write activities for a particular disk unit
+   Params 	-	a pointer to an array of characters containing the unit
+   Returns	-	integer (not sure what this integer is)
+   Side Effects	- none
+   ----------------------------------------------------------------------- */
 static int DiskDriver(char *arg)
 {
 	int result, status;
+	// create a queue for waiting
     int unit = atoi( (char *) arg); 	// Unit is passed as arg.
+
     // infinite loop until the disk proc is zapped!
-    while(! isZapped()){
+    while(!isZapped()){
     	result = waitDevice(USLOSS_DISK_DEV, unit, &status);
     	if (result != 0)
     		return 0;
-    	if(status & SYS_DISKREAD)
-    		DiskRead();
+    	if(status & USLOSS_DEV_READY){
+
+    	}
     }
-
-
     return 0;
+}
+
+/* ------------------------------------------------------------------------
+   Name		-	diskRead
+   Purpose	-	reads n sectors from specified disk
+   Params 	-	a struct of arguments
+   Returns	-	none; places
+   Side Effects	- none
+   ----------------------------------------------------------------------- */
+void DiskRead(systemArgs *args){
+	/* Contents of the argument object as follows:
+	 * sysArg.arg1 = diskBuffer;
+	 * sysArg.arg2 = sectors;
+	 * sysArg.arg3 = track;
+	 * sysArg.arg4 = first;
+	 * sysArg.arg5 = unit;
+	*/
+	char *msg;
+	// if any of the arguments passed have illegal values, set arg4 to -1 and return
+	if(args->arg1 <= 0 || args->arg2 < 1 || args->arg3 < 0 || args->arg4 < 0 || args->arg5 < 0){
+		args->arg4 = -1;
+		return;
+	}
+	// read the information from the unit
+	diskQueue(USLOSS_DISK_READ, args->arg5, getpid());
+	// wait on personal mbox until done
+	MboxReceive(pFourProcTable[getpid() % MAXPROC].procMbox, msg, 0);
+}
+
+/* ------------------------------------------------------------------------
+   Name		-
+   Purpose	-
+   Params 	-	a struct of arguments; args[1] contains
+   Returns	-
+   Side Effects	-
+   ----------------------------------------------------------------------- */
+void DiskWrite(systemArgs *args);
+
+// sorts a process onto the appropriate disk queue in circular scan ordering
+void diskQueue(int opr, int unit, int track, int first, int sectors, int *diskBuffer){
+	//
+}
+
+/* ------------------------------------------------------------------------
+   Name		-   diskReadReal
+   Purpose	-   Reads sectors sectors from the disk indicated by unit,
+                starting at track track and sector first . The sectors are
+                copied into buffer.
+   Params 	-   int unit, int track, int first sector, int number of sectors,
+                void * buffer to read into
+   Returns	-   -1: invalid parameters; 0: sectors were read successfully;
+                >0: disk’s status register
+   Side Effects	- none
+   ----------------------------------------------------------------------- */
+int diskReadReal(int unit, int track, int first, int sectors, void *buffer){
+	char * dummyMsg;
+
+	// add self in sorted order on appropriate disk unit queue to permit the process
+	diskQueue(unit, track, first, sectors);
+	// receive on the process's personal mailbox
+	MboxReceive(pFourProcTable[getpid() % MAXPROC].procMbox, dummyMsg, 0);
+
+}
+
+/* ------------------------------------------------------------------------
+   Name		-   diskWriteReal
+   Purpose	-   Reads sectors sectors from the disk indicated by unit,
+                starting at track track and sector first . The sectors are
+                copied into buffer.
+   Params 	-   int unit, int track, int first sector, int number of sectors,
+                void * buffer to read into
+   Returns	-   -1: invalid parameters; 0: sectors were written successfully;
+                >0: disk’s status register
+   Side Effects	- none
+   ----------------------------------------------------------------------- */
+int diskWriteReal(int unit, int track, int first, int sectors, void *buffer){
+
 }
 
 void diskSize(systemArgs *args){
@@ -434,140 +604,4 @@ void termWrite(systemArgs *args){
 
 int termWriteReal(char * address, int numChars, int unitNum){
     
-}
-
-/* ------------------------------------------------------------------------
-   Name		-	sleep
-   Purpose	-   puts a process to sleep for a number of seconds specified
-                by the user
-   Params 	-	a struct of arguments; args[1] contains the number of
-   	   	   	   	seconds the process will sleep
-   Returns	-	placed into 4th position in argument struct; -1 if input
-   Side Effects	-
-   ----------------------------------------------------------------------- */
-void sleep(systemArgs *args){
-	if (debugFlag)
-		USLOSS_Console("sleep(): started.\n");
-	int reply = 0;
-	/* verify that the specified interrupt number is correct */
-	if(args->number != SYS_SLEEP){
-		if (debugFlag)
-			USLOSS_Console("sleep(): Attempted a \"sleep\" operation with wrong sys call number: %d.\n", args->number);
-		toUserMode();
-		return;
-	}
-	/* check to make sure that the specified number of seconds is >= 1 and is an integer */
-	if(!isdigit(args->arg1) || args->arg1 < 1){
-		if (debugFlag)
-			USLOSS_Console("sleep(): Invalid number of seconds specified for sleep operation: %d.\n", args->arg1);
-		reply = -1;
-	}
-	/* call helper method and assign return value */
-	else
-		sleepHelper(args->arg1);
-	args->arg4 = &reply;
-	toUserMode();
-	return;
-}
-
-void sleepHelper(int seconds){
-	struct ProcStruct * target = &pFourProcTable[getPID() % MAXPROC];
-	char msg[50];
-
-	/* add a new entry to the clockWaiter table */
-	clockWaiterAdd(getPID(), seconds);
-	/* receive on the clockDriver mbox */
-	MboxReceive(target->procMbox, msg, 0);
-}
-
-// a helper method which adds a clockWaiter object onto the queue
-void clockWaiterAdd(int pid, int seconds){
-	/* compute the wake up time for the process */
-	int wakeUpTime = getTimeOfDayReal() + seconds;
-	/* place the process in the wait line */
-	clockWaitLine[getpid() % MAXPROC].PID = getpid();
-	struct clockWaiter * position = &clockWaitLine[getpid() % MAXPROC];
-	/* if there are no current waiting processes place at head of queue */
-	if(clockWaiterHead == NULL){
-		clockWaiterHead = position;
-	}
-	/* if the current process's wait time is shorter than the head proc's
-	 * waiting time, place the new proc at the head */
-	else if(clockWaiterHead->secsRemaining >= position->secsRemaining){
-		position->next = clockWaiterHead;
-		clockWaiterHead = position;
-	}
-	/* if there is only one current process in the queue, place the new proc
-	 * at the end of the queue */
-	else if(clockWaiterTail == NULL){
-		clockWaiterHead->next = position;
-		clockWaiterTail = position;
-	}
-	/* if the current proc's wait time is greater than the tail proc's wait
-	 * time, place the current proc at the tail */
-	else if(clockWaiterTail->secsRemaining <= position->secsRemaining){
-		position->next = clockWaiterTail;
-		clockWaiterTail = position;
-	}
-	/* base case: locate the proper position for the current process and insert */
-	else{
-		struct clockWaiter * counter = clockWaiterHead;
-		for(; counter->next->secsRemaining < position->secsRemaining; counter = counter->next);
-		position->next = counter->next;
-		counter->next = position;
-	}
-}
-
-/* ------------------------------------------------------------------------
-   Name		-	diskRead
-   Purpose	-	reads n sectors from specified disk
-   Params 	-	a struct of arguments
-   Returns	-	none; places
-   Side Effects	- none
-   ----------------------------------------------------------------------- */
-void diskRead(systemArgs *args){
-	// if any of the arguments passed have illegal values, set arg4 to -1 and return
-	if(args->arg1 <= 0 || args->arg2 < 1 || args->arg3 < 0 || args->arg4 < 0 || args->arg5 < 0){
-		args->arg4 = -1;
-		return;
-	}
-	// read the information from the unit
-	int reply = diskReadReal(args->arg5, args->arg3, args->arg4, args->arg2, args->arg1);
-	// if the return value is
-}
-/* sysArg.arg1 = diskBuffer;
-	sysArg.arg2 = sectors;
-	sysArg.arg3 = track;
-	sysArg.arg4 = first;
-	sysArg.arg5 = unit;
-	*/
-
-/* ------------------------------------------------------------------------
-   Name		-   diskReadReal
-   Purpose	-   Reads sectors sectors from the disk indicated by unit,
-                starting at track track and sector first . The sectors are
-                copied into buffer.
-   Params 	-   int unit, int track, int first sector, int number of sectors,
-                void * buffer to read into
-   Returns	-   -1: invalid parameters; 0: sectors were read successfully;
-                >0: disk’s status register
-   Side Effects	- none
-   ----------------------------------------------------------------------- */
-
-int diskReadReal(int unit, int track, int first, int sectors, void *buffer){
-	// verify that disk device is ready to be read from
-	if(())
-}
-
-/* ------------------------------------------------------------------------
-   Name		-
-   Purpose	-
-   Params 	-	a struct of arguments; args[1] contains
-   Returns	-
-   Side Effects	-
-   ----------------------------------------------------------------------- */
-void diskWrite(systemArgs *args);
-
-int diskWriteReal(int unit, int track, int first, int sectors, void *buffer){
-
 }
