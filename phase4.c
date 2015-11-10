@@ -29,8 +29,8 @@ void diskWrite(systemArgs *args);
 struct Terminal terminals[USLOSS_MAX_UNITS];
 struct ProcStruct pFourProcTable[MAXPROC];
 struct clockWaiter clockWaitLine[MAXPROC];
-struct Disk diskOne;
-struct Disk diskTwo;
+struct diskProc *diskOne;
+struct diskProc *diskTwo;
 struct clockWaiter * clockWaiterHead;
 struct clockWaiter * clockWaiterTail;
 struct USLOSS_DeviceRequest diskRW;
@@ -56,6 +56,7 @@ start3(void)
     	pFourProcTable[i].procMbox=-1;
     	pFourProcTable[i].parentPid=-1;
 		memset(pFourProcTable[i].children, INACTIVE, sizeof(pFourProcTable[i].children));
+		pFourProcTable[i].procMbox = MboxCreate(0,50);
     }
     /* initialize clockWaitLine */
     for(i = 0; i < MAXPROC; i++){
@@ -282,17 +283,26 @@ static int DiskDriver(char *arg)
     	if (result != 0)
     		return 0;
     	if(status & USLOSS_DEV_READY){
+    		// enter mutex
 
+    		// fetch the first process from the queue
+
+    		// if a read process, execute read
+
+    		// if a write proc, execute write
+
+    		//remove the first proc from the queue
     	}
     }
-    return 0;
+    // once zapped, quit
+    quit(0);
 }
 
 /* ------------------------------------------------------------------------
    Name		-	diskRead
    Purpose	-	reads n sectors from specified disk
    Params 	-	a struct of arguments
-   Returns	-	none; places
+   Returns	-	none
    Side Effects	- none
    ----------------------------------------------------------------------- */
 void DiskRead(systemArgs *args){
@@ -310,23 +320,43 @@ void DiskRead(systemArgs *args){
 		return;
 	}
 	// read the information from the unit
-	diskQueue(USLOSS_DISK_READ, args->arg5, getpid());
+	diskQueue(USLOSS_DISK_READ, args->arg5, args, getpid());
 	// wait on personal mbox until done
 	MboxReceive(pFourProcTable[getpid() % MAXPROC].procMbox, msg, 0);
 }
 
 /* ------------------------------------------------------------------------
-   Name		-
-   Purpose	-
-   Params 	-	a struct of arguments; args[1] contains
-   Returns	-
-   Side Effects	-
+   Name		-   DiskWrite
+   Purpose	-   Interrupt Handler for disk write signals
+   Params 	-	a struct of arguments; contents in the method
+   Returns	-   none
+   Side Effects	- none
    ----------------------------------------------------------------------- */
-void DiskWrite(systemArgs *args);
+void DiskWrite(systemArgs *args){
+	/* Contents of the argument object as follows:
+	 * sysArg.arg1 = diskBuffer;
+	 * sysArg.arg2 = sectors;
+	 * sysArg.arg3 = track;
+	 * sysArg.arg4 = first;
+	 * sysArg.arg5 = unit;
+	*/
+	char *msg;
+	// if any of the arguments passed have illegal values, set arg4 to -1 and return
+	if(args->arg1 <= 0 || args->arg2 < 1 || args->arg3 < 0 || args->arg4 < 0 || args->arg5 < 0){
+		args->arg4 = -1;
+		return;
+	}
+	// read the information from the unit
+	diskQueue(USLOSS_DISK_WRITE, args->arg5, args, getpid());
+	// wait on personal mbox until done
+	MboxReceive(pFourProcTable[getpid() % MAXPROC].procMbox, msg, 0);
+}
 
 // sorts a process onto the appropriate disk queue in circular scan ordering
-void diskQueue(int opr, int unit, int track, int first, int sectors, int *diskBuffer){
-	//
+void diskQueue(int opr, int unit, systemArgs *args, int pid){
+	// select the target queue
+	if(unit == 1)
+		struct diskProc * target =
 }
 
 /* ------------------------------------------------------------------------
@@ -341,20 +371,14 @@ void diskQueue(int opr, int unit, int track, int first, int sectors, int *diskBu
    Side Effects	- none
    ----------------------------------------------------------------------- */
 int diskReadReal(int unit, int track, int first, int sectors, void *buffer){
-	char * dummyMsg;
-
-	// add self in sorted order on appropriate disk unit queue to permit the process
-	diskQueue(unit, track, first, sectors);
-	// receive on the process's personal mailbox
-	MboxReceive(pFourProcTable[getpid() % MAXPROC].procMbox, dummyMsg, 0);
 
 }
 
 /* ------------------------------------------------------------------------
    Name		-   diskWriteReal
-   Purpose	-   Reads sectors sectors from the disk indicated by unit,
-                starting at track track and sector first . The sectors are
-                copied into buffer.
+   Purpose	-   Writes sectors to the disk indicated by unit, starting at
+                track track and sector first . The sectors are copied into
+                buffer.
    Params 	-   int unit, int track, int first sector, int number of sectors,
                 void * buffer to read into
    Returns	-   -1: invalid parameters; 0: sectors were written successfully;
