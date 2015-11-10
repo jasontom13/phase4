@@ -55,6 +55,7 @@ struct Terminal {
     int bufferBox;
     int writeBox;
     int mutexBox;
+    int readEnabled;
 } Terminal;
 
 struct diskProc {
