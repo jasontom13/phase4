@@ -17,13 +17,6 @@
 #define DISK_UNITS 2
 #define TERM_UNITS 4
 
-/* proc table object */
-struct clockWaiter{
-	int PID;
-	int secsRemaining;
-	struct clockWaiter * next;
-}clockWaiter;
-
 /*
  * Function prototypes for this phase.
  */
@@ -49,6 +42,7 @@ struct ProcStruct {
     int children[MAXPROC];
     char name[MAXNAME];
     int procMbox;
+    int procSem;
     int (*func)(char *);
     char *arg;
     long returnStatus;
@@ -64,14 +58,22 @@ struct Terminal {
     int readEnabled;
 } Terminal;
 
-struct diskWaiter {
-	int pid;
-	int type;      // use usloss disk operation macros
-	int track;     // specifies the track on which to read/write
-	int first;     // first sector to read
-	int sectors;   // number of sectors to read
-    void *buffer;   // address of the buffer to which to read
+
+struct diskProc {
+	int pid;                  // pid of the offending process
+	int type;                 // use usloss disk operation macros
+	int track;                // specifies the track on which to read/write
+	int first;                // first sector to read
+	int sectors;              // number of sectors to read
+	void *buffer              // address of the buffer to which to read
+	struct diskProc * next;
 } diskProc;
+
+struct clockWaiter{
+	int PID;
+	int secsRemaining;
+	struct clockWaiter * next;
+}clockWaiter;
 
 #define ERR_INVALID             -1
 #define ERR_OK                  0
