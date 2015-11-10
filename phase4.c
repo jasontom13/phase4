@@ -21,7 +21,7 @@ void diskSize(systemArgs *args);
 void termRead(systemArgs *args);
 void termWrite(systemArgs *args);
 void diskSizeReal(int unitNum, int * sectorSize, int * numSectors, int * numTracks);
-void sleep(systemArgs *args);
+void snooze(systemArgs *args);
 void diskRead(systemArgs *args);
 void diskWrite(systemArgs *args);
 
@@ -67,7 +67,7 @@ start3(void)
     clockWaiterTail = NULL;
 
     /* add syscalls to syscallVec */
-    systemCallVec[SYS_SLEEP] = sleep;
+    systemCallVec[SYS_SLEEP] = snooze;
     systemCallVec[SYS_DISKREAD] = diskRead;
     systemCallVec[SYS_DISKWRITE] = diskWrite;
     systemCallVec[SYS_DISKSIZE] = diskSize;
@@ -168,6 +168,8 @@ static int ClockDriver(char *arg)
         result = waitDevice(USLOSS_CLOCK_DEV, 0, &status);
         if (result != 0)
             return 0;
+        for(i = 0; i < MAXPROC; i++){
+        	clockWaitLine[i].PID = -1;
 		/* Compute the current time and wake up any processes whose time has come. */
 		int timeNow;
 		gettimeofdayReal(&timeNow);
@@ -191,7 +193,7 @@ static int ClockDriver(char *arg)
    Returns	-	placed into 4th position in argument struct; -1 if input
    Side Effects	-
    ----------------------------------------------------------------------- */
-void sleep(systemArgs *args){
+void snooze(systemArgs *args){
 	if (debugFlag)
 		USLOSS_Console("sleep(): started.\n");
 	int reply = 0;
@@ -276,6 +278,9 @@ static int DiskDriver(char *arg)
 	int result, status;
 	// create a queue for waiting
     int unit = atoi( (char *) arg); 	// Unit is passed as arg.
+
+    // v the semaphore so that the system knows that the diskdriver is running
+    semvReal
 
     // infinite loop until the disk proc is zapped!
     while(!isZapped()){
