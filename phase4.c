@@ -418,6 +418,7 @@ static int TermDriver(char * arg){
     int bufferBox;
     int writeBox;
     int mutexBox;
+    int result;
     mutexBox = MboxCreate(1, MAXLINE);
     inBox = MboxCreate(1, MAX_MESSAGE);
     outBox = MboxCreate(1, MAX_MESSAGE);
@@ -428,15 +429,26 @@ static int TermDriver(char * arg){
     terminals[unit].outBox = outBox;
     terminals[unit].bufferBox = bufferBox;
     terminals[unit].mutexBox = mutexBox;
+    terminals[unit].readEnabled = 0;
     
     while(!isZapped()){
-        waitDevice(USLOSS_TERM_DEV, unit ,&status);
+        result = waitDevice(USLOSS_TERM_DEV, unit ,&status);
+        if(result!=0){
+            if(debugFlag){
+                USLOSS_Console("TermDriver(): The result was not equal to zero, quitting..\n");
+            }
+            quit(0);
+        }
         // If received char, send to char in Box
-        if(USLOSS_TERM_STAT_RECV(status) == USLOSS_DEV_BUSY){
+        status = 0;
+        status = USLOSS_TERM_STAT_RECV(status);
+        if(status == USLOSS_DEV_BUSY){
             MboxSend(terminals[unit].inBox, USLOSS_TERM_STAT_CHAR(status), 1);
         }
+        status = 0;
+        status = USLOSS_TERM_STAT_XMIT(status);
         // If sent char, send result to char out Box
-        if(USLOSS_TERM_STAT_XMIT(status) == USLOSS_DEV_READY){
+        if(status == USLOSS_DEV_READY){
             MboxSend(terminals[unit].outBox, USLOSS_TERM_STAT_CHAR(status), 1);
         }
     }
@@ -534,8 +546,20 @@ int termReadReal(char * address, int maxSize, int unitNum){
     
     char * msg;
     char * temp;
-    temp = msg;
+    int control;
+    int result;
+    
+    if(!terminals[unitNum].readEnabled){
+        // Turning read interrupts on if it is not already.
+        for(i=0;i<USLOSS_TERM_UNITS;i++){
+            control = 0;
+            control = USLOSS_TERM_CTRL_RECV_INT(control);
+            result = USLOSS_DeviceOutput(USLOSS_TERM_DEV, (void *)(long) i+1, control);
+        }
+    }
+    
     MboxReceive(terminals[unitNum].bufferBox, msg, maxSize);
+    temp = msg;
     
     for(i=0;i<maxSize; i++){
         if(*temp!='\n'){
@@ -609,7 +633,7 @@ static int TermWriter(char * arg){
         MboxReceive(terminals[unit].writeBox, line, MAXLINE);
         // Setting the xmit int enable bit
         int control = 0;
-        USLOSS_TERM_CTRL_XMIT_INT(control);
+        control = USLOSS_TERM_CTRL_XMIT_INT(control);
         USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, control);
         char temp;
         while(1){
@@ -625,7 +649,10 @@ static int TermWriter(char * arg){
             line++;
             charsWritten++;
         }
-        USLOSS_TERM_CTRL_XMIT_DISABLE(control);
+        // Disabling CTRL XMIT
+        control = USLOSS_TERM_CTRL_XMIT_DISABLE(control);
+        USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, control);
+        
         MboxSend(terminals[unit].mutexBox, charsWritten, 1);
     }  
 //    // Get the full line from mailBox
