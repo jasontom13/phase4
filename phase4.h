@@ -70,7 +70,7 @@ struct diskWaiter {
 	int track;     // specifies the track on which to read/write
 	int first;     // first sector to read
 	int sectors;   // number of sectors to read
-	void *buffer   // address of the buffer to which to read
+    void *buffer;   // address of the buffer to which to read
 } diskProc;
 
 #define ERR_INVALID             -1

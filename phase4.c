@@ -19,7 +19,9 @@ static int TermReader(char *);
 static int TermWriter(char *);
 void diskSize(systemArgs *args);
 void termRead(systemArgs *args);
+int termReadReal(char * address, int maxSize, int unitNum);
 void termWrite(systemArgs *args);
+long termWriteReal(char * address, int numChars, int unitNum);
 void diskSizeReal(int unitNum, int * sectorSize, int * numSectors, int * numTracks);
 void sleep(systemArgs *args);
 void diskRead(systemArgs *args);
@@ -97,10 +99,10 @@ start3(void)
      * driver, and perhaps do something with the pid returned.
      */
 
-    char buf[50];
+    //char buf[50];
     for (i = 0; i < DISK_UNITS; i++) {
-        sprintf(buf, "Disk Driver #%d", i);
-        pid = fork1(buf, DiskDriver, NULL, USLOSS_MIN_STACK, 2);
+        sprintf(name, "Disk Driver #%d", i);
+        pid = fork1(name, DiskDriver, NULL, USLOSS_MIN_STACK, 2);
         if (pid < 0) {
             USLOSS_Console("start3(): Can't create disk driver %d\n", i+1);
             USLOSS_Halt(1);
@@ -109,22 +111,25 @@ start3(void)
     sempReal(running);
     sempReal(running);
 
+    //char unitNum[50];
     /* Create terminal device drivers. */
     for(i=0; i < USLOSS_TERM_UNITS; i++){
-        sprintf(buf, "Terminal Driver #%d", i);
-    	pid = fork1(buf, TermDriver, i+1, USLOSS_MIN_STACK, 2);
+        sprintf(name, "Terminal Driver #%d", i+1);
+        sprintf(termbuf, "%d", i+1);
+        
+    	pid = fork1(name, TermDriver, termbuf, USLOSS_MIN_STACK, 2);
     	if (pid < 0) {
 			USLOSS_Console("start3(): Can't create terminal driver %d\n", i+1);
 			USLOSS_Halt(1);
 		}
-        sprintf(buf, "Terminal Reader #%d", i);
-        pid = fork1(buf, TermReader, i+1, USLOSS_MIN_STACK, 2);
+        sprintf(name, "Terminal Reader #%d", i);
+        pid = fork1(name, TermReader, termbuf, USLOSS_MIN_STACK, 2);
         if (pid < 0) {
             USLOSS_Console("start3(): Can't create terminal reader %d\n", i+1);
             USLOSS_Halt(1);
         }
-        sprintf(buf, "Terminal Writer #%d", i);
-        pid = fork1(buf, TermWriter, i+1, USLOSS_MIN_STACK, 2);
+        sprintf(name, "Terminal Writer #%d", i);
+        pid = fork1(name, TermWriter, termbuf, USLOSS_MIN_STACK, 2);
         if (pid < 0) {
             USLOSS_Console("start3(): Can't create terminal writer %d\n", i+1);
             USLOSS_Halt(1);
@@ -171,7 +176,7 @@ static int ClockDriver(char *arg)
 		int timeNow;
 		gettimeofdayReal(&timeNow);
 		char msg[50];
-		int temp;
+		//int temp;
 		for(; clockWaiterHead != NULL && clockWaiterHead->secsRemaining <= timeNow; clockWaiterHead = clockWaiterHead->next){
 			MboxCondSend(clockWaiterHead->PID, msg, 0);
 			clockWaiterHead->PID = -1;
@@ -198,18 +203,17 @@ void sleep(systemArgs *args){
 	if(args->number != SYS_SLEEP){
 		if (debugFlag)
 			USLOSS_Console("sleep(): Attempted a \"sleep\" operation with wrong sys call number: %d.\n", args->number);
-		toUserMode();
 		return;
 	}
 	/* check to make sure that the specified number of seconds is >= 1 and is an integer */
-	if(!isdigit(args->arg1) || args->arg1 < 1){
+	if(!isdigit((int)args->arg1) || (int)args->arg1 < 1){
 		if (debugFlag)
 			USLOSS_Console("sleep(): Invalid number of seconds specified for sleep operation: %d.\n", args->arg1);
 		reply = -1;
 	}
 	/* call helper method and assign return value */
 	else
-		sleepHelper(args->arg1);
+		sleepHelper((int)args->arg1);
 	args->arg4 = &reply;
 	toUserMode();
 	return;
@@ -295,7 +299,7 @@ static int DiskDriver(char *arg)
    Returns	-	none; places
    Side Effects	- none
    ----------------------------------------------------------------------- */
-void DiskRead(systemArgs *args){
+void diskRead(systemArgs *args){
 	/* Contents of the argument object as follows:
 	 * sysArg.arg1 = diskBuffer;
 	 * sysArg.arg2 = sectors;
@@ -305,8 +309,8 @@ void DiskRead(systemArgs *args){
 	*/
 	char *msg;
 	// if any of the arguments passed have illegal values, set arg4 to -1 and return
-	if(args->arg1 <= 0 || args->arg2 < 1 || args->arg3 < 0 || args->arg4 < 0 || args->arg5 < 0){
-		args->arg4 = -1;
+	if(args->arg1 <= 0 || (int)args->arg2 < 1 || args->arg3 < 0 || args->arg4 < 0 || args->arg5 < 0){
+		args->arg4 = (void *)-1;
 		return;
 	}
 	// read the information from the unit
@@ -322,7 +326,7 @@ void DiskRead(systemArgs *args){
    Returns	-
    Side Effects	-
    ----------------------------------------------------------------------- */
-void DiskWrite(systemArgs *args);
+void diskWrite(systemArgs *args);
 
 // sorts a process onto the appropriate disk queue in circular scan ordering
 void diskQueue(int opr, int unit, int track, int first, int sectors, int *diskBuffer){
@@ -376,7 +380,7 @@ void diskSize(systemArgs *args){
         toUserMode();
         return;
     }
-    int unitNum = args->arg1;
+    int unitNum = (int)args->arg1;
     int sectorSize;
     int numTracks;
     int numSectors;
@@ -396,7 +400,7 @@ void diskSizeReal(int unitNum, int * sectorSize, int * numSectors, int * numTrac
     USLOSS_DeviceRequest request;
     request.opr = USLOSS_DISK_TRACKS;
     request.reg1 = numTracks;
-    USLOSS_Device_output(USLOSS_DISK_DEV, unitNum, request);
+    USLOSS_Device_output(USLOSS_DISK_DEV, unitNum, &request);
     
     /* Getting sectorSize */
     *sectorSize = 512;
@@ -556,6 +560,7 @@ int termReadReal(char * address, int maxSize, int unitNum){
             control = USLOSS_TERM_CTRL_RECV_INT(control);
             result = USLOSS_DeviceOutput(USLOSS_TERM_DEV, (void *)(long) i+1, control);
         }
+        terminals[unitNum].readEnabled = 1;
     }
     
     MboxReceive(terminals[unitNum].bufferBox, msg, maxSize);
@@ -624,10 +629,8 @@ int termReadReal(char * address, int maxSize, int unitNum){
 static int TermWriter(char * arg){
     
     int unit = atoi( (char *) arg);
-    char msg[MAXLINE];
-    int i=0;
     char * line;
-    int charsWritten = 0;
+    long charsWritten = 0;
     
     while(1){
         MboxReceive(terminals[unit].writeBox, line, MAXLINE);
@@ -653,7 +656,7 @@ static int TermWriter(char * arg){
         control = USLOSS_TERM_CTRL_XMIT_DISABLE(control);
         USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, control);
         
-        MboxSend(terminals[unit].mutexBox, charsWritten, 1);
+        MboxSend(terminals[unit].mutexBox, (void *)charsWritten, 1);
     }  
 //    // Get the full line from mailBox
 //    while(1){
@@ -712,14 +715,14 @@ void termWrite(systemArgs *args){
     address = (char *)args->arg1;
     numChars = (int)args->arg2;
     unitNum = (int)args->arg3;
-    int numWritten;
+    long numWritten;
     
     numWritten = termWriteReal(address, numChars, unitNum);
     
-    args->arg2 = numWritten;
+    args->arg2 = (void *)numWritten;
 }
 
-int termWriteReal(char * address, int numChars, int unitNum){
+long termWriteReal(char * address, int numChars, int unitNum){
     
     if(unitNum>USLOSS_MAX_UNITS ){
         if (debugFlag){
@@ -728,8 +731,8 @@ int termWriteReal(char * address, int numChars, int unitNum){
         return -1;
     }
     MboxSend(terminals[unitNum].writeBox, address, numChars);
-    int charsWritten;
-    MboxReceive(terminals[unitNum].mutexBox, charsWritten, 1);
+    long charsWritten;
+    MboxReceive(terminals[unitNum].mutexBox, (void *)charsWritten, 1);
     return charsWritten;
     
 }
