@@ -29,8 +29,16 @@ void diskWrite(systemArgs *args);
 struct Terminal terminals[USLOSS_MAX_UNITS];
 struct ProcStruct pFourProcTable[MAXPROC];
 struct clockWaiter clockWaitLine[MAXPROC];
-struct diskProc *diskOne;
-struct diskProc *diskTwo;
+struct diskProc diskOne[MAXPROC];
+struct diskProc * diskOneHead;
+struct diskProc * diskOneTail;
+struct diskProc diskTwo[MAXPROC];
+struct diskProc * diskTwoHead;
+struct diskProc * diskTwoTail;
+int diskOneArmPos;
+int diskTwoArmPos;
+int diskOneMutex;
+int diskTwoMutex;
 struct clockWaiter * clockWaiterHead;
 struct clockWaiter * clockWaiterTail;
 struct USLOSS_DeviceRequest diskRW;
@@ -89,7 +97,6 @@ start3(void)
      * Wait for the clock driver to start. The idea is that ClockDriver
      * will V the semaphore "running" once it is running.
      */
-
     sempReal(running);
 
     /*
@@ -99,6 +106,10 @@ start3(void)
      */
 
     char buf[50];
+
+    // create the disk mutex semaphores
+    diskOneMutex = semcreateReal(0);
+    diskTwoMutex = semcreateReal(0);
     for (i = 0; i < DISK_UNITS; i++) {
         sprintf(buf, "Disk Driver #%d", i);
         pid = fork1(buf, DiskDriver, NULL, USLOSS_MIN_STACK, 2);
@@ -168,8 +179,6 @@ static int ClockDriver(char *arg)
         result = waitDevice(USLOSS_CLOCK_DEV, 0, &status);
         if (result != 0)
             return 0;
-        for(i = 0; i < MAXPROC; i++){
-        	clockWaitLine[i].PID = -1;
 		/* Compute the current time and wake up any processes whose time has come. */
 		int timeNow;
 		gettimeofdayReal(&timeNow);
@@ -275,12 +284,28 @@ void clockWaiterAdd(int pid, int seconds){
    ----------------------------------------------------------------------- */
 static int DiskDriver(char *arg)
 {
-	int result, status;
+	int result, status, unit;
+	int * armPointer;
+	int * diskMutex;
+	int * diskProc;
+
 	// create a queue for waiting
-    int unit = atoi( (char *) arg); 	// Unit is passed as arg.
+    unit = atoi( (char *) arg); 	// Unit is passed as arg.
+    // set pointers to the queue, the arm, and the mutex sem
+    if(unit == 1){
+    	diskProc = diskOneHead;
+    	armPointer = &diskOneArmPos;
+    	diskMutex = &diskOneMutex;
+    }else{
+    	diskProc = diskTwoHead;
+    	armPointer = &diskTwoArmPos;
+    	diskMutex = &diskTwoMutex;
+    }
+
+    *armPointer = USLOSS_DISK_TRACK_SIZE / 2;
 
     // v the semaphore so that the system knows that the diskdriver is running
-    semvReal
+    semvReal(running);
 
     // infinite loop until the disk proc is zapped!
     while(!isZapped()){
@@ -289,14 +314,12 @@ static int DiskDriver(char *arg)
     		return 0;
     	if(status & USLOSS_DEV_READY){
     		// enter mutex
-
-    		// fetch the first process from the queue
-
-    		// if a read process, execute read
-
-    		// if a write proc, execute write
-
-    		//remove the first proc from the queue
+    		sempReal(*diskMutex);
+    		diskProc *temp = diskProc;
+    		diskProc = diskProc->next;
+    		// execute the first process on the queue
+    		diskProc->
+    		//remove the first proc from the queue and exit mutex
     	}
     }
     // once zapped, quit
@@ -361,7 +384,12 @@ void DiskWrite(systemArgs *args){
 void diskQueue(int opr, int unit, systemArgs *args, int pid){
 	// select the target queue
 	if(unit == 1)
-		struct diskProc * target =
+		struct diskProc * target = diskOne;
+	else
+		struct diskProc * target = diskTwo;
+	/* traverse the queue; if requests are found for similar track numbers, insert
+	 * request */
+	if(target->)
 }
 
 /* ------------------------------------------------------------------------
