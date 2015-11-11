@@ -150,6 +150,9 @@ typedef struct USLOSS_DeviceRequest
 #define	USLOSS_TERM_CTRL_XMIT_INT(ctrl)\
 	((ctrl) | 0x4)			/* enable xmit interrupts */
 
+#define	USLOSS_TERM_CTRL_XMIT_INT_DISABLE(ctrl)\
+    ((ctrl) & ~0x65531)			/* disable xmit interrupts */
+
 #define	USLOSS_TERM_CTRL_RECV_INT(ctrl)\
 	((ctrl) | 0x2)			/* enable recv interrupts */
 

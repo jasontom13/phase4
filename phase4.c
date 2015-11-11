@@ -19,22 +19,26 @@ static int TermReader(char *);
 static int TermWriter(char *);
 void diskSize(systemArgs *args);
 void termRead(systemArgs *args);
+int termReadReal(char * address, int maxSize, int unitNum);
 void termWrite(systemArgs *args);
+long termWriteReal(char * address, int numChars, int unitNum);
 void diskSizeReal(int unitNum, int * sectorSize, int * numSectors, int * numTracks);
 void snooze(systemArgs *args);
 void diskRead(systemArgs *args);
 void diskWrite(systemArgs *args);
+void toUserMode();
+void sleepHelper(int seconds);
+void clockWaiterAdd(int pid, int seconds);
 
 /* -------------------------- Globals ------------------------------------- */
 struct Terminal terminals[USLOSS_MAX_UNITS];
 struct ProcStruct pFourProcTable[MAXPROC];
 struct clockWaiter clockWaitLine[MAXPROC];
-struct diskProc diskOne[MAXPROC];
+struct diskProc diskQ[MAXPROC];
 struct diskProc * diskOneHead;
-struct diskProc * diskOneTail;
-struct diskProc diskTwo[MAXPROC];
 struct diskProc * diskTwoHead;
-struct diskProc * diskTwoTail;
+struct USLOSS_DeviceRequest diskOneReq;
+struct USLOSS_DeviceRequest diskTwoReq;
 int diskOneArmPos;
 int diskTwoArmPos;
 int diskOneMutex;
@@ -105,14 +109,13 @@ start3(void)
      * driver, and perhaps do something with the pid returned.
      */
 
-    char buf[50];
-
     // create the disk mutex semaphores
     diskOneMutex = semcreateReal(0);
     diskTwoMutex = semcreateReal(0);
+
     for (i = 0; i < DISK_UNITS; i++) {
-        sprintf(buf, "Disk Driver #%d", i);
-        pid = fork1(buf, DiskDriver, NULL, USLOSS_MIN_STACK, 2);
+        sprintf(name, "Disk Driver #%d", i);
+        pid = fork1(name, DiskDriver, NULL, USLOSS_MIN_STACK, 2);
         if (pid < 0) {
             USLOSS_Console("start3(): Can't create disk driver %d\n", i+1);
             USLOSS_Halt(1);
@@ -121,22 +124,25 @@ start3(void)
     sempReal(running);
     sempReal(running);
 
+    //char unitNum[50];
     /* Create terminal device drivers. */
     for(i=0; i < USLOSS_TERM_UNITS; i++){
-        sprintf(buf, "Terminal Driver #%d", i);
-    	pid = fork1(buf, TermDriver, i+1, USLOSS_MIN_STACK, 2);
+        sprintf(name, "Terminal Driver #%d", i+1);
+        sprintf(termbuf, "%d", i+1);
+        
+    	pid = fork1(name, TermDriver, termbuf, USLOSS_MIN_STACK, 2);
     	if (pid < 0) {
 			USLOSS_Console("start3(): Can't create terminal driver %d\n", i+1);
 			USLOSS_Halt(1);
 		}
-        sprintf(buf, "Terminal Reader #%d", i);
-        pid = fork1(buf, TermReader, i+1, USLOSS_MIN_STACK, 2);
+        sprintf(name, "Terminal Reader #%d", i);
+        pid = fork1(name, TermReader, termbuf, USLOSS_MIN_STACK, 2);
         if (pid < 0) {
             USLOSS_Console("start3(): Can't create terminal reader %d\n", i+1);
             USLOSS_Halt(1);
         }
-        sprintf(buf, "Terminal Writer #%d", i);
-        pid = fork1(buf, TermWriter, i+1, USLOSS_MIN_STACK, 2);
+        sprintf(name, "Terminal Writer #%d", i);
+        pid = fork1(name, TermWriter, termbuf, USLOSS_MIN_STACK, 2);
         if (pid < 0) {
             USLOSS_Console("start3(): Can't create terminal writer %d\n", i+1);
             USLOSS_Halt(1);
@@ -169,6 +175,7 @@ static int ClockDriver(char *arg)
 {
     int result;
     int status;
+    int i;
 
     // Let the parent know we are running and enable interrupts.
     semvReal(running);
@@ -179,11 +186,14 @@ static int ClockDriver(char *arg)
         result = waitDevice(USLOSS_CLOCK_DEV, 0, &status);
         if (result != 0)
             return 0;
+        for(i = 0; i < MAXPROC; i++){
+        	clockWaitLine[i].PID = -1;
+        }
 		/* Compute the current time and wake up any processes whose time has come. */
 		int timeNow;
 		gettimeofdayReal(&timeNow);
 		char msg[50];
-		int temp;
+		//int temp;
 		for(; clockWaiterHead != NULL && clockWaiterHead->secsRemaining <= timeNow; clockWaiterHead = clockWaiterHead->next){
 			MboxCondSend(clockWaiterHead->PID, msg, 0);
 			clockWaiterHead->PID = -1;
@@ -191,6 +201,7 @@ static int ClockDriver(char *arg)
 	}
     // Once Zapped, call quit
     quit(0);
+    return 0;
 }
 
 /* ------------------------------------------------------------------------
@@ -210,29 +221,28 @@ void snooze(systemArgs *args){
 	if(args->number != SYS_SLEEP){
 		if (debugFlag)
 			USLOSS_Console("sleep(): Attempted a \"sleep\" operation with wrong sys call number: %d.\n", args->number);
-		toUserMode();
 		return;
 	}
 	/* check to make sure that the specified number of seconds is >= 1 and is an integer */
-	if(!isdigit(args->arg1) || args->arg1 < 1){
+	if(!isdigit((int)args->arg1) || (int)args->arg1 < 1){
 		if (debugFlag)
 			USLOSS_Console("sleep(): Invalid number of seconds specified for sleep operation: %d.\n", args->arg1);
 		reply = -1;
 	}
 	/* call helper method and assign return value */
 	else
-		sleepHelper(args->arg1);
+		sleepHelper((int)args->arg1);
 	args->arg4 = &reply;
 	toUserMode();
 	return;
 }
 
 void sleepHelper(int seconds){
-	struct ProcStruct * target = &pFourProcTable[getPID() % MAXPROC];
+	struct ProcStruct * target = &pFourProcTable[getpid() % MAXPROC];
 	char msg[50];
 
 	/* add a new entry to the clockWaiter table */
-	clockWaiterAdd(getPID(), seconds);
+	clockWaiterAdd(getpid(), seconds);
 	/* receive on the clockDriver mbox */
 	MboxReceive(target->procMbox, msg, 0);
 }
@@ -287,19 +297,22 @@ static int DiskDriver(char *arg)
 	int result, status, unit;
 	int * armPointer;
 	int * diskMutex;
-	int * diskProc;
+	struct diskProc * q;
+	struct USLOSS_DeviceRequest * req;
 
 	// create a queue for waiting
     unit = atoi( (char *) arg); 	// Unit is passed as arg.
     // set pointers to the queue, the arm, and the mutex sem
     if(unit == 1){
-    	diskProc = diskOneHead;
+    	q = diskOneHead;
     	armPointer = &diskOneArmPos;
     	diskMutex = &diskOneMutex;
+    	req = &diskOneReq;
     }else{
-    	diskProc = diskTwoHead;
+    	q = diskTwoHead;
     	armPointer = &diskTwoArmPos;
     	diskMutex = &diskTwoMutex;
+    	req = &diskTwoReq;
     }
 
     *armPointer = USLOSS_DISK_TRACK_SIZE / 2;
@@ -313,13 +326,34 @@ static int DiskDriver(char *arg)
     	if (result != 0)
     		return 0;
     	if(status & USLOSS_DEV_READY){
+    		// if there are no elements on the q waitAgain on the device
+    		if(q == NULL)
+    			continue;
     		// enter mutex
     		sempReal(*diskMutex);
-    		diskProc *temp = diskProc;
-    		diskProc = diskProc->next;
+    		// if the current arm position is different from the operation track, seek to the requested track
+    		if(*armPointer != q->track){
+    			req->opr = USLOSS_DISK_SEEK;
+    			req->reg1 = q->track;
+    			USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, req);
+    			*armPointer = q->track;
+    		}
     		// execute the first process on the queue
-    		diskProc->
+    		req->opr = q->type;
+    		int iter;
+    		for(iter = 0; iter < q->sectors; iter++){
+    			req->reg1 = q->first + iter;
+    			req->reg2 = q->buffer;
+    			USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, req);
+    		}
     		//remove the first proc from the queue and exit mutex
+    		q->pid = DISKPROCEMPTY;
+    		if(unit == 1)
+    			diskOneHead = diskOneHead->next;
+    		else
+    			diskTwoHead = diskTwoHead->next;
+    		// exit mutex
+    		semvReal(*diskMutex);
     	}
     }
     // once zapped, quit
@@ -333,7 +367,7 @@ static int DiskDriver(char *arg)
    Returns	-	none
    Side Effects	- none
    ----------------------------------------------------------------------- */
-void DiskRead(systemArgs *args){
+void diskRead(systemArgs *args){
 	/* Contents of the argument object as follows:
 	 * sysArg.arg1 = diskBuffer;
 	 * sysArg.arg2 = sectors;
@@ -343,8 +377,8 @@ void DiskRead(systemArgs *args){
 	*/
 	char *msg;
 	// if any of the arguments passed have illegal values, set arg4 to -1 and return
-	if(args->arg1 <= 0 || args->arg2 < 1 || args->arg3 < 0 || args->arg4 < 0 || args->arg5 < 0){
-		args->arg4 = -1;
+	if(args->arg1 <= 0 || (int)args->arg2 < 1 || args->arg3 < 0 || args->arg4 < 0 || args->arg5 < 0){
+		args->arg4 = (void *)-1;
 		return;
 	}
 	// read the information from the unit
@@ -360,7 +394,7 @@ void DiskRead(systemArgs *args){
    Returns	-   none
    Side Effects	- none
    ----------------------------------------------------------------------- */
-void DiskWrite(systemArgs *args){
+void diskWrite(systemArgs *args){
 	/* Contents of the argument object as follows:
 	 * sysArg.arg1 = diskBuffer;
 	 * sysArg.arg2 = sectors;
@@ -382,14 +416,45 @@ void DiskWrite(systemArgs *args){
 
 // sorts a process onto the appropriate disk queue in circular scan ordering
 void diskQueue(int opr, int unit, systemArgs *args, int pid){
+	struct diskProc * target;
+
 	// select the target queue
 	if(unit == 1)
-		struct diskProc * target = diskOne;
+		target = diskOneHead;
 	else
-		struct diskProc * target = diskTwo;
-	/* traverse the queue; if requests are found for similar track numbers, insert
-	 * request */
-	if(target->)
+		target = diskTwoHead;
+	/* traverse the queue; if requests are found for similar track numbers, insert request */
+	// if there are no items currently on the head, insert
+	if(target == NULL)
+		diskOneHead = diskQueueInsert(unit,opr,args,pid,NULL);
+	// otherwise, find the position where the new node will fit
+	else{
+		for(;target->next != NULL && target->next->track <= args.arg3 && target->next->first <= args.arg4; target = target->next);
+		if(target->next == NULL)
+			target->next = diskQueueInsert(unit,opr,args,pid,NULL);
+		else
+			target->next = diskQueueInsert(unit,opr,args,pid,target->next);
+	}
+}
+
+struct diskProc *  diskQueueHelper(int unit, int opr, systemArgs *args, int pid, struct diskProc * next){
+	/* Contents of the argument object as follows:
+	 * sysArg.arg1 = diskBuffer;
+	 * sysArg.arg2 = sectors;
+	 * sysArg.arg3 = track;
+	 * sysArg.arg4 = first;
+	 * sysArg.arg5 = unit;
+	*/
+	// select available position in the queue
+	struct diskProc * target = &diskQ[pid%MAXPROC];
+	target->pid = pid;
+	target->unit = unit;
+	target->type = opr;
+	target->track = args->arg3;
+	target->sectors = args->arg2;
+	target->first = args->arg4;
+	target->next = next;
+	return target;
 }
 
 /* ------------------------------------------------------------------------
@@ -433,16 +498,16 @@ void diskSize(systemArgs *args){
         toUserMode();
         return;
     }
-    int unitNum = args->arg1;
+    int unitNum = (int)args->arg1;
     int sectorSize;
     int numTracks;
     int numSectors;
     
     diskSizeReal(unitNum, &sectorSize, &numSectors, &numTracks);
     
-    args->arg1 = sectorSize;
-    args->arg2 = numSectors;
-    args->arg3 = numTracks;
+    args->arg1 = (void *)(long)sectorSize;
+    args->arg2 = (void *)(long)numSectors;
+    args->arg3 = (void *)(long)numTracks;
 }
 
 void diskSizeReal(int unitNum, int * sectorSize, int * numSectors, int * numTracks){
@@ -453,7 +518,7 @@ void diskSizeReal(int unitNum, int * sectorSize, int * numSectors, int * numTrac
     USLOSS_DeviceRequest request;
     request.opr = USLOSS_DISK_TRACKS;
     request.reg1 = numTracks;
-    USLOSS_Device_output(USLOSS_DISK_DEV, unitNum, request);
+    USLOSS_DeviceOutput(USLOSS_DISK_DEV, unitNum, &request);
     
     /* Getting sectorSize */
     *sectorSize = 512;
@@ -472,21 +537,23 @@ static int TermDriver(char * arg){
     int unit = atoi( (char *) arg);
     int inBox;
     int outBox;
-    int bufferBox;
     int writeBox;
     int mutexBox;
     int result;
+    int recv;
+    int xmit;
     mutexBox = MboxCreate(1, MAXLINE);
     inBox = MboxCreate(1, MAX_MESSAGE);
     outBox = MboxCreate(1, MAX_MESSAGE);
-    bufferBox = MboxCreate(10, MAX_MESSAGE);
     writeBox = MboxCreate(1, MAXLINE);
     terminals[unit].pid = getpid();
     terminals[unit].inBox = inBox;
     terminals[unit].outBox = outBox;
-    terminals[unit].bufferBox = bufferBox;
     terminals[unit].mutexBox = mutexBox;
     terminals[unit].readEnabled = 0;
+    
+    // Finished initialization
+    semvReal(running);
     
     while(!isZapped()){
         result = waitDevice(USLOSS_TERM_DEV, unit ,&status);
@@ -497,16 +564,14 @@ static int TermDriver(char * arg){
             quit(0);
         }
         // If received char, send to char in Box
-        status = 0;
-        status = USLOSS_TERM_STAT_RECV(status);
-        if(status == USLOSS_DEV_BUSY){
-            MboxSend(terminals[unit].inBox, USLOSS_TERM_STAT_CHAR(status), 1);
+        recv = USLOSS_TERM_STAT_RECV(status);
+        if(recv == USLOSS_DEV_BUSY){
+            MboxSend(terminals[unit].inBox, (void *)(long)USLOSS_TERM_STAT_CHAR(status), 1);
         }
-        status = 0;
-        status = USLOSS_TERM_STAT_XMIT(status);
+        xmit = USLOSS_TERM_STAT_XMIT(status);
         // If sent char, send result to char out Box
-        if(status == USLOSS_DEV_READY){
-            MboxSend(terminals[unit].outBox, USLOSS_TERM_STAT_CHAR(status), 1);
+        if(xmit == USLOSS_DEV_READY){
+            MboxSend(terminals[unit].outBox, (void *)(long)USLOSS_TERM_STAT_CHAR(status), 1);
         }
     }
     
@@ -519,34 +584,37 @@ static int TermReader(char * arg){
     char msg[MAXLINE];
     int i=0;
     int charsRead = 0;
-    char temp;
+    char * temp;
+    int bufferBox;
+    bufferBox = MboxCreate(10, MAX_MESSAGE);
+    terminals[unit].bufferBox = bufferBox;
+    
+    // Finished initialization
+    semvReal(running);
     
     // Get the full line from mailBox
-    while(1){
-        while(1){
-            MboxReceive(terminals[unit].inBox, temp, 1);
-            if (charsRead >= MAXLINE){
-                break;
+    while(!isZapped()){
+        MboxReceive(terminals[unit].inBox, temp, 1);
+        if(charsRead >= MAXLINE || *temp == '\n'){
+            if(debugFlag){
+                USLOSS_Console("termReadReal(): finished reading line: ");
+                int j = 0;
+                for(j=0;j<strlen(msg);j++){
+                    USLOSS_Console("%c", msg[j]);
+                }
+                USLOSS_Console("\n");
             }
-            else if(temp == '\n'){
-                msg[i] = temp;
-                i++;
-                break;
-            }
-            msg[i] = temp;
+            MboxCondSend(terminals[unit].bufferBox, msg, charsRead);
+            // Clearing out the msg buffer after send
+            memset(msg, '\0', MAXLINE);
+            charsRead = 0;
+            i=0;
+        }
+        else{
+            msg[i] = *temp;
             i++;
             charsRead++;
         }
-        msg[i]='\0';
-        if(debugFlag){
-            USLOSS_Console("termReadReal(): finished reading line: ");
-            int j = 0;
-            for(j=0;j<strlen(msg);j++){
-                USLOSS_Console("%c", msg[j]);
-            }
-            USLOSS_Console("\n");
-        }
-        MboxSend(terminals[unit].bufferBox, msg, charsRead);
     }
 }
     /*
@@ -580,12 +648,12 @@ void termRead(systemArgs *args){
     
     // Check unit number validity and line length validity
     if(unitNum > USLOSS_MAX_UNITS-1 || maxSize > MAXLINE){
-        args->arg4 = -1;
+        args->arg4 = (void *)(long)-1;
     }
     
     int charsRead;
     charsRead = termReadReal(address, maxSize, unitNum);
-    args -> arg2 = charsRead;
+    args -> arg2 = (void *)(long)charsRead;
     
 }
 
@@ -611,8 +679,9 @@ int termReadReal(char * address, int maxSize, int unitNum){
         for(i=0;i<USLOSS_TERM_UNITS;i++){
             control = 0;
             control = USLOSS_TERM_CTRL_RECV_INT(control);
-            result = USLOSS_DeviceOutput(USLOSS_TERM_DEV, (void *)(long) i+1, control);
+            result = USLOSS_DeviceOutput(USLOSS_TERM_DEV, i+1, control);
         }
+        terminals[unitNum].readEnabled = 1;
     }
     
     MboxReceive(terminals[unitNum].bufferBox, msg, maxSize);
@@ -628,7 +697,7 @@ int termReadReal(char * address, int maxSize, int unitNum){
         temp++;
     }
     
-    strcat("\n", msg);
+    //strcat("\n", msg);
     strcpy(address, msg);
     
     return charsRead;
@@ -681,22 +750,23 @@ int termReadReal(char * address, int maxSize, int unitNum){
 static int TermWriter(char * arg){
     
     int unit = atoi( (char *) arg);
-    char msg[MAXLINE];
-    int i=0;
     char * line;
-    int charsWritten = 0;
+    long charsWritten = 0;
     
-    while(1){
+    semvReal(running);
+    
+    while(!isZapped()){
         MboxReceive(terminals[unit].writeBox, line, MAXLINE);
         // Setting the xmit int enable bit
         int control = 0;
         control = USLOSS_TERM_CTRL_XMIT_INT(control);
         USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, control);
-        char temp;
+        char * temp;
         while(1){
             MboxReceive(terminals[unit].outBox, temp, MAXLINE);
-            USLOSS_TERM_CTRL_CHAR(control, *line);
-            USLOSS_TERM_CTRL_XMIT_CHAR(control);
+            control = USLOSS_TERM_CTRL_CHAR(control, *line);
+            control = USLOSS_TERM_CTRL_XMIT_CHAR(control);
+            USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, control);
             if( *line=='\n' || *line == '\0'){
                 if(debugFlag){
                     USLOSS_Console("TermWriter(): Reached end of string for write.\n");
@@ -707,10 +777,10 @@ static int TermWriter(char * arg){
             charsWritten++;
         }
         // Disabling CTRL XMIT
-        control = USLOSS_TERM_CTRL_XMIT_DISABLE(control);
+        control = USLOSS_TERM_CTRL_XMIT_INT_DISABLE(control);
         USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, control);
         
-        MboxSend(terminals[unit].mutexBox, charsWritten, 1);
+        MboxSend(terminals[unit].mutexBox, (void *)charsWritten, 1);
     }  
 //    // Get the full line from mailBox
 //    while(1){
@@ -769,14 +839,14 @@ void termWrite(systemArgs *args){
     address = (char *)args->arg1;
     numChars = (int)args->arg2;
     unitNum = (int)args->arg3;
-    int numWritten;
+    long numWritten;
     
     numWritten = termWriteReal(address, numChars, unitNum);
     
-    args->arg2 = numWritten;
+    args->arg2 = (void *)numWritten;
 }
 
-int termWriteReal(char * address, int numChars, int unitNum){
+long termWriteReal(char * address, int numChars, int unitNum){
     
     if(unitNum>USLOSS_MAX_UNITS ){
         if (debugFlag){
@@ -785,8 +855,22 @@ int termWriteReal(char * address, int numChars, int unitNum){
         return -1;
     }
     MboxSend(terminals[unitNum].writeBox, address, numChars);
-    int charsWritten;
-    MboxReceive(terminals[unitNum].mutexBox, charsWritten, 1);
+    long charsWritten;
+    MboxReceive(terminals[unitNum].mutexBox, (void *)charsWritten, 1);
     return charsWritten;
     
+}
+
+void toUserMode(){
+    
+    if(debugFlag){
+        USLOSS_Console("toUserMode(): switching to User Mode.\n");
+    }
+    USLOSS_PsrSet(USLOSS_PsrGet() & ~USLOSS_PSR_CURRENT_MODE);
+    //    unsigned int psr = USLOSS_PsrGet();
+    //    USLOSS_Console("toUserMode(): PSR before: %d\n", psr & USLOSS_PSR_CURRENT_MODE);
+    //    psr = (psr & ~1);
+    //    //psr &= ~(0 << USLOSS_PSR_CURRENT_MODE);
+    //    USLOSS_PsrSet(psr);
+    //    USLOSS_Console("toUserMode(): PSR after: %d\n", psr & USLOSS_PSR_CURRENT_MODE);
 }
