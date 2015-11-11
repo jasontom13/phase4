@@ -26,6 +26,9 @@ void diskSizeReal(int unitNum, int * sectorSize, int * numSectors, int * numTrac
 void snooze(systemArgs *args);
 void diskRead(systemArgs *args);
 void diskWrite(systemArgs *args);
+void toUserMode();
+void sleepHelper(int seconds);
+void clockWaiterAdd(int pid, int seconds);
 
 /* -------------------------- Globals ------------------------------------- */
 struct Terminal terminals[USLOSS_MAX_UNITS];
@@ -226,11 +229,11 @@ void snooze(systemArgs *args){
 }
 
 void sleepHelper(int seconds){
-	struct ProcStruct * target = &pFourProcTable[getPID() % MAXPROC];
+	struct ProcStruct * target = &pFourProcTable[getpid() % MAXPROC];
 	char msg[50];
 
 	/* add a new entry to the clockWaiter table */
-	clockWaiterAdd(getPID(), seconds);
+	clockWaiterAdd(getpid(), seconds);
 	/* receive on the clockDriver mbox */
 	MboxReceive(target->procMbox, msg, 0);
 }
@@ -419,9 +422,9 @@ void diskSize(systemArgs *args){
     
     diskSizeReal(unitNum, &sectorSize, &numSectors, &numTracks);
     
-    args->arg1 = sectorSize;
-    args->arg2 = numSectors;
-    args->arg3 = numTracks;
+    args->arg1 = (void *)(long)sectorSize;
+    args->arg2 = (void *)(long)numSectors;
+    args->arg3 = (void *)(long)numTracks;
 }
 
 void diskSizeReal(int unitNum, int * sectorSize, int * numSectors, int * numTracks){
@@ -432,7 +435,7 @@ void diskSizeReal(int unitNum, int * sectorSize, int * numSectors, int * numTrac
     USLOSS_DeviceRequest request;
     request.opr = USLOSS_DISK_TRACKS;
     request.reg1 = numTracks;
-    USLOSS_Device_output(USLOSS_DISK_DEV, unitNum, &request);
+    USLOSS_DeviceOutput(USLOSS_DISK_DEV, unitNum, &request);
     
     /* Getting sectorSize */
     *sectorSize = 512;
@@ -451,21 +454,23 @@ static int TermDriver(char * arg){
     int unit = atoi( (char *) arg);
     int inBox;
     int outBox;
-    int bufferBox;
     int writeBox;
     int mutexBox;
     int result;
+    int recv;
+    int xmit;
     mutexBox = MboxCreate(1, MAXLINE);
     inBox = MboxCreate(1, MAX_MESSAGE);
     outBox = MboxCreate(1, MAX_MESSAGE);
-    bufferBox = MboxCreate(10, MAX_MESSAGE);
     writeBox = MboxCreate(1, MAXLINE);
     terminals[unit].pid = getpid();
     terminals[unit].inBox = inBox;
     terminals[unit].outBox = outBox;
-    terminals[unit].bufferBox = bufferBox;
     terminals[unit].mutexBox = mutexBox;
     terminals[unit].readEnabled = 0;
+    
+    // Finished initialization
+    semvReal(running);
     
     while(!isZapped()){
         result = waitDevice(USLOSS_TERM_DEV, unit ,&status);
@@ -476,16 +481,14 @@ static int TermDriver(char * arg){
             quit(0);
         }
         // If received char, send to char in Box
-        status = 0;
-        status = USLOSS_TERM_STAT_RECV(status);
-        if(status == USLOSS_DEV_BUSY){
-            MboxSend(terminals[unit].inBox, USLOSS_TERM_STAT_CHAR(status), 1);
+        recv = USLOSS_TERM_STAT_RECV(status);
+        if(recv == USLOSS_DEV_BUSY){
+            MboxSend(terminals[unit].inBox, (void *)(long)USLOSS_TERM_STAT_CHAR(status), 1);
         }
-        status = 0;
-        status = USLOSS_TERM_STAT_XMIT(status);
+        xmit = USLOSS_TERM_STAT_XMIT(status);
         // If sent char, send result to char out Box
-        if(status == USLOSS_DEV_READY){
-            MboxSend(terminals[unit].outBox, USLOSS_TERM_STAT_CHAR(status), 1);
+        if(xmit == USLOSS_DEV_READY){
+            MboxSend(terminals[unit].outBox, (void *)(long)USLOSS_TERM_STAT_CHAR(status), 1);
         }
     }
     
@@ -498,34 +501,37 @@ static int TermReader(char * arg){
     char msg[MAXLINE];
     int i=0;
     int charsRead = 0;
-    char temp;
+    char * temp;
+    int bufferBox;
+    bufferBox = MboxCreate(10, MAX_MESSAGE);
+    terminals[unit].bufferBox = bufferBox;
+    
+    // Finished initialization
+    semvReal(running);
     
     // Get the full line from mailBox
-    while(1){
-        while(1){
-            MboxReceive(terminals[unit].inBox, temp, 1);
-            if (charsRead >= MAXLINE){
-                break;
+    while(!isZapped()){
+        MboxReceive(terminals[unit].inBox, temp, 1);
+        if(charsRead >= MAXLINE || *temp == '\n'){
+            if(debugFlag){
+                USLOSS_Console("termReadReal(): finished reading line: ");
+                int j = 0;
+                for(j=0;j<strlen(msg);j++){
+                    USLOSS_Console("%c", msg[j]);
+                }
+                USLOSS_Console("\n");
             }
-            else if(temp == '\n'){
-                msg[i] = temp;
-                i++;
-                break;
-            }
-            msg[i] = temp;
+            MboxCondSend(terminals[unit].bufferBox, msg, charsRead);
+            // Clearing out the msg buffer after send
+            memset(msg, '\0', MAXLINE);
+            charsRead = 0;
+            i=0;
+        }
+        else{
+            msg[i] = *temp;
             i++;
             charsRead++;
         }
-        msg[i]='\0';
-        if(debugFlag){
-            USLOSS_Console("termReadReal(): finished reading line: ");
-            int j = 0;
-            for(j=0;j<strlen(msg);j++){
-                USLOSS_Console("%c", msg[j]);
-            }
-            USLOSS_Console("\n");
-        }
-        MboxSend(terminals[unit].bufferBox, msg, charsRead);
     }
 }
     /*
@@ -559,12 +565,12 @@ void termRead(systemArgs *args){
     
     // Check unit number validity and line length validity
     if(unitNum > USLOSS_MAX_UNITS-1 || maxSize > MAXLINE){
-        args->arg4 = -1;
+        args->arg4 = (void *)(long)-1;
     }
     
     int charsRead;
     charsRead = termReadReal(address, maxSize, unitNum);
-    args -> arg2 = charsRead;
+    args -> arg2 = (void *)(long)charsRead;
     
 }
 
@@ -590,7 +596,7 @@ int termReadReal(char * address, int maxSize, int unitNum){
         for(i=0;i<USLOSS_TERM_UNITS;i++){
             control = 0;
             control = USLOSS_TERM_CTRL_RECV_INT(control);
-            result = USLOSS_DeviceOutput(USLOSS_TERM_DEV, (void *)(long) i+1, control);
+            result = USLOSS_DeviceOutput(USLOSS_TERM_DEV, i+1, control);
         }
         terminals[unitNum].readEnabled = 1;
     }
@@ -608,7 +614,7 @@ int termReadReal(char * address, int maxSize, int unitNum){
         temp++;
     }
     
-    strcat("\n", msg);
+    //strcat("\n", msg);
     strcpy(address, msg);
     
     return charsRead;
@@ -664,17 +670,20 @@ static int TermWriter(char * arg){
     char * line;
     long charsWritten = 0;
     
-    while(1){
+    semvReal(running);
+    
+    while(!isZapped()){
         MboxReceive(terminals[unit].writeBox, line, MAXLINE);
         // Setting the xmit int enable bit
         int control = 0;
         control = USLOSS_TERM_CTRL_XMIT_INT(control);
         USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, control);
-        char temp;
+        char * temp;
         while(1){
             MboxReceive(terminals[unit].outBox, temp, MAXLINE);
-            USLOSS_TERM_CTRL_CHAR(control, *line);
-            USLOSS_TERM_CTRL_XMIT_CHAR(control);
+            control = USLOSS_TERM_CTRL_CHAR(control, *line);
+            control = USLOSS_TERM_CTRL_XMIT_CHAR(control);
+            USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, control);
             if( *line=='\n' || *line == '\0'){
                 if(debugFlag){
                     USLOSS_Console("TermWriter(): Reached end of string for write.\n");
@@ -685,7 +694,7 @@ static int TermWriter(char * arg){
             charsWritten++;
         }
         // Disabling CTRL XMIT
-        control = USLOSS_TERM_CTRL_XMIT_DISABLE(control);
+        control = USLOSS_TERM_CTRL_XMIT_INT_DISABLE(control);
         USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, control);
         
         MboxSend(terminals[unit].mutexBox, (void *)charsWritten, 1);
@@ -767,4 +776,18 @@ long termWriteReal(char * address, int numChars, int unitNum){
     MboxReceive(terminals[unitNum].mutexBox, (void *)charsWritten, 1);
     return charsWritten;
     
+}
+
+void toUserMode(){
+    
+    if(debugFlag){
+        USLOSS_Console("toUserMode(): switching to User Mode.\n");
+    }
+    USLOSS_PsrSet(USLOSS_PsrGet() & ~USLOSS_PSR_CURRENT_MODE);
+    //    unsigned int psr = USLOSS_PsrGet();
+    //    USLOSS_Console("toUserMode(): PSR before: %d\n", psr & USLOSS_PSR_CURRENT_MODE);
+    //    psr = (psr & ~1);
+    //    //psr &= ~(0 << USLOSS_PSR_CURRENT_MODE);
+    //    USLOSS_PsrSet(psr);
+    //    USLOSS_Console("toUserMode(): PSR after: %d\n", psr & USLOSS_PSR_CURRENT_MODE);
 }
