@@ -29,6 +29,7 @@ void diskWrite(systemArgs *args);
 void toUserMode();
 void sleepHelper(int seconds);
 void clockWaiterAdd(int pid, int seconds);
+void diskQueue(int opr, int unit, systemArgs *args, int pid);
 
 /* -------------------------- Globals ------------------------------------- */
 struct Terminal terminals[USLOSS_MAX_UNITS];
@@ -135,18 +136,24 @@ start3(void)
 			USLOSS_Console("start3(): Can't create terminal driver %d\n", i+1);
 			USLOSS_Halt(1);
 		}
+        terminals[i+1].pid = pid;
         sprintf(name, "Terminal Reader #%d", i);
         pid = fork1(name, TermReader, termbuf, USLOSS_MIN_STACK, 2);
         if (pid < 0) {
             USLOSS_Console("start3(): Can't create terminal reader %d\n", i+1);
             USLOSS_Halt(1);
         }
+        terminals[i+1].readerPid = pid;
         sprintf(name, "Terminal Writer #%d", i);
         pid = fork1(name, TermWriter, termbuf, USLOSS_MIN_STACK, 2);
         if (pid < 0) {
             USLOSS_Console("start3(): Can't create terminal writer %d\n", i+1);
             USLOSS_Halt(1);
         }
+        terminals[i+1].writerPid = pid;
+        sempReal(running);
+        sempReal(running);
+        sempReal(running);
     }
 
 
@@ -163,9 +170,22 @@ start3(void)
     /*
      * Zap the device drivers
      */
+    // Terminals
+    for (i=0; i< USLOSS_TERM_UNITS; i++){
+        MboxSend(terminals[i+1].writeBox, "", 0);
+        zap(terminals[i+1].writerPid);
+        MboxSend(terminals[i+1].inBox, "", 0);
+        zap(terminals[i+1].readerPid);
+        
+        zap(terminals[i+1].pid);
+        join(&status);
+        join(&status);
+        join(&status);
+    }
     // zap(clockPID);  // clock driver
     // zap(); // 1st disk driver
     // zap(); //
+    
 
     // eventually, at the end:
     quit(0);
@@ -429,7 +449,7 @@ void diskQueue(int opr, int unit, systemArgs *args, int pid){
 		diskOneHead = diskQueueInsert(unit,opr,args,pid,NULL);
 	// otherwise, find the position where the new node will fit
 	else{
-		for(;target->next != NULL && target->next->track <= args.arg3 && target->next->first <= args.arg4; target = target->next);
+		for(;target->next != NULL && target->next->track <= args->arg3 && target->next->first <= args->arg4; target = target->next);
 		if(target->next == NULL)
 			target->next = diskQueueInsert(unit,opr,args,pid,NULL);
 		else
@@ -546,7 +566,6 @@ static int TermDriver(char * arg){
     inBox = MboxCreate(1, MAX_MESSAGE);
     outBox = MboxCreate(1, MAX_MESSAGE);
     writeBox = MboxCreate(1, MAXLINE);
-    terminals[unit].pid = getpid();
     terminals[unit].inBox = inBox;
     terminals[unit].outBox = outBox;
     terminals[unit].mutexBox = mutexBox;

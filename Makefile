@@ -3,7 +3,7 @@ TARGET = libphase4.a
 ASSIGNMENT = 452phase4
 CC = gcc
 AR = ar
-COBJS = phase4.o libuser2.o
+COBJS = phase4.o libuser.o
 CSRCS = ${COBJS:.o=.c}
 
 PHASE1LIB = patrickphase1
@@ -12,7 +12,7 @@ PHASE3LIB = patrickphase3
 #PHASE1LIB = patrickphase1debug
 #PHASE2LIB = patrickphase2debug
 
-HDRS = libuser2.h sems.h phase1.h phase2.h phase3.h phase4.h usloss.h usyscall.h provided_prototypes.h
+HDRS = libuser.h sems.h phase1.h phase2.h phase3.h phase4.h usloss.h usyscall.h provided_prototypes.h
 
 INCLUDE = ./usloss/include
 
@@ -54,9 +54,9 @@ phase4.o:	phase4.h
 turnin: $(CSRCS) $(HDRS) $(TURNIN)
 	turnin $(ASSIGNMENT) $(CSRCS) $(HDRS) $(TURNIN)
 
-libuser2.a:	libuser2.c
-	$(CC) $(CFLAGS) -c libuser2.c
-	ar -r libuser2.a libuser2.o
+libuser.a:	libuser.c
+	$(CC) $(CFLAGS) -c libuser.c
+	ar -r libuser.a libuser.o
 
 submit: $(CSRCS) $(HDRS) Makefile
 	tar cvzf phase4.tgz $(CSRCS) $(HDRS) Makefile

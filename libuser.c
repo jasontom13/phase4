@@ -6,10 +6,9 @@
 //  Copyright (c) 2015 Jason. All rights reserved.
 //
 
-#include "libuser2.h"
+#include "libuser.h"
 #include <phase1.h>
 #include <phase2.h>
-#include <libuser.h>
 #include <usyscall.h>
 #include <usloss.h>
 
