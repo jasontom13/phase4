@@ -50,6 +50,8 @@ struct ProcStruct {
 
 struct Terminal {
     int pid;
+    int readerPid;
+    int writerPid;
     int inBox;
     int outBox;
     int bufferBox;
