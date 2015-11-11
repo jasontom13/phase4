@@ -29,6 +29,7 @@ void diskWrite(systemArgs *args);
 void toUserMode();
 void sleepHelper(int seconds);
 void clockWaiterAdd(int pid, int seconds);
+void diskQueue(int opr, int unit, systemArgs *args, int pid);
 
 /* -------------------------- Globals ------------------------------------- */
 struct Terminal terminals[USLOSS_MAX_UNITS];
@@ -448,7 +449,7 @@ void diskQueue(int opr, int unit, systemArgs *args, int pid){
 		diskOneHead = diskQueueInsert(unit,opr,args,pid,NULL);
 	// otherwise, find the position where the new node will fit
 	else{
-		for(;target->next != NULL && target->next->track <= args.arg3 && target->next->first <= args.arg4; target = target->next);
+		for(;target->next != NULL && target->next->track <= args->arg3 && target->next->first <= args->arg4; target = target->next);
 		if(target->next == NULL)
 			target->next = diskQueueInsert(unit,opr,args,pid,NULL);
 		else
