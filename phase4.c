@@ -292,7 +292,7 @@ void clockWaiterAdd(int pid, int seconds){
    Returns	-	integer (not sure what this integer is)
    Side Effects	- none
    ----------------------------------------------------------------------- */
-static int DiskDriver(char *arg)
+void DiskDriver(char *arg)
 {
 	int result, status, unit;
 	int * armPointer;
