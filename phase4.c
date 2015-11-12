@@ -207,9 +207,6 @@ static int ClockDriver(char *arg)
         result = waitDevice(USLOSS_CLOCK_DEV, 0, &status);
         if (result != 0)
             return 0;
-        for(i = 0; i < MAXPROC; i++){
-        	clockWaitLine[i].PID = -1;
-        }
 		/* Compute the current time and wake up any processes whose time has come. */
 		int timeNow;
 		gettimeofdayReal(&timeNow);
@@ -259,21 +256,31 @@ void snooze(systemArgs *args){
 }
 
 void sleepHelper(int seconds){
+	if (debugFlag)
+			USLOSS_Console("sleepHelper(): started.\n");
 	struct ProcStruct * target = &pFourProcTable[getpid() % MAXPROC];
 	char msg[50];
 
 	/* add a new entry to the clockWaiter table */
+	if (debugFlag)
+			USLOSS_Console("sleepHelper(): calling helper method.\n");
 	clockWaiterAdd(getpid(), seconds);
 	/* receive on the clockDriver mbox */
+	if (debugFlag)
+				USLOSS_Console("sleepHelper(): executing receive on process mbox.\n");
 	MboxReceive(target->procMbox, msg, 0);
 }
 
 // a helper method which adds a clockWaiter object onto the queue
 void clockWaiterAdd(int pid, int seconds){
+	if (debugFlag)
+			USLOSS_Console("clockWaiterAdd(): started.\n");
 	/* compute the wake up time for the process */
 	int wakeUpTime;
 	gettimeofdayReal(&wakeUpTime);
 	wakeUpTime += seconds;
+	if (debugFlag)
+		USLOSS_Console("sleepHelper(): calling helper method.\n");
 	/* place the process in the wait line */
 	clockWaitLine[getpid() % MAXPROC].PID = getpid();
 	clockWaitLine[getpid() % MAXPROC].secsRemaining = wakeUpTime;
@@ -450,7 +457,7 @@ void diskQueue(int opr, int unit, systemArgs *args, int pid){
 	/* traverse the queue; if requests are found for similar track numbers, insert request */
 	// if there are no items currently on the head, insert
 	if(target == NULL)
-		diskOneHead = diskQueueInsert(unit,opr,args,pid,NULL);
+		diskOneHead = diskQueueHelper(unit,opr,args,pid,NULL);
 	// otherwise, find the position where the new node will fit
 	else{
 		for(;target->next != NULL && target->next->track <= args->arg3 && target->next->first <= args->arg4; target = target->next);
@@ -493,7 +500,26 @@ struct diskProc *  diskQueueHelper(int unit, int opr, systemArgs *args, int pid,
    Side Effects	- none
    ----------------------------------------------------------------------- */
 int diskReadReal(int unit, int track, int first, int sectors, void *buffer){
-
+	struct USLOSS_DeviceRequest * req;
+	// select the correct global request object
+	if(unit == 1)
+		req = &diskOneReq;
+	else
+		req = &diskTwoReq;
+	// if the current arm position is different from the operation track, seek to the requested track
+	if(*armPointer != q->track){
+		req->opr = USLOSS_DISK_SEEK;
+		req->reg1 = q->track;
+		USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, req);
+		*armPointer = q->track;
+	}
+	req->opr = USLOSS_DISK_READ;
+	int iter;
+	for(iter = 0; iter < sectors; iter++){
+		req->reg1 = first + iter;
+		req->reg2 = ;
+		USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, req);
+	}
 }
 
 /* ------------------------------------------------------------------------
@@ -508,7 +534,12 @@ int diskReadReal(int unit, int track, int first, int sectors, void *buffer){
    Side Effects	- none
    ----------------------------------------------------------------------- */
 int diskWriteReal(int unit, int track, int first, int sectors, void *buffer){
-
+	struct USLOSS_DeviceRequest * req;
+	// select the correct global request object
+	if(unit == 1)
+			req = &diskOneReq;
+		else
+			req = &diskTwoReq;
 }
 
 void diskSize(systemArgs *args){
