@@ -1,4 +1,4 @@
-#include <usloss.h>
+#include "usloss.h"
 #include <phase1.h>
 #include <phase2.h>
 #include <phase3.h>
@@ -450,7 +450,7 @@ void diskQueue(int opr, int unit, systemArgs *args, int pid){
 	/* traverse the queue; if requests are found for similar track numbers, insert request */
 	// if there are no items currently on the head, insert
 	if(target == NULL)
-		diskOneHead = diskQueueInsert(unit,opr,args,pid,NULL);
+		diskOneHead = diskQueueHelper(unit,opr,args,pid,NULL);
 	// otherwise, find the position where the new node will fit
 	else{
 		for(;target->next != NULL && target->next->track <= args->arg3 && target->next->first <= args->arg4; target = target->next);
