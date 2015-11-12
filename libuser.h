@@ -26,6 +26,7 @@ extern int  SemCreate(int value, int *semaphore);
 extern int  SemP(int semaphore);
 extern int  SemV(int semaphore);
 extern int  SemFree(int semaphore);
+extern int Sleep(int delay);
 
 
 //extern int  Spawn(char *name, int (*func)(char *), char *arg, int stack_size,

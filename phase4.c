@@ -13,7 +13,7 @@
 
 /* ------------------------- Prototypes ----------------------------------- */
 static int	ClockDriver(char *);
-static int	DiskDriver(char *);
+static void	DiskDriver(char *);
 static int TermDriver(char *);
 static int TermReader(char *);
 static int TermWriter(char *);
@@ -30,6 +30,7 @@ void toUserMode();
 void sleepHelper(int seconds);
 void clockWaiterAdd(int pid, int seconds);
 void diskQueue(int opr, int unit, systemArgs *args, int pid);
+struct diskProc *  diskQueueHelper(int unit, int opr, systemArgs *args, int pid, struct diskProc * next);
 
 /* -------------------------- Globals ------------------------------------- */
 struct Terminal terminals[USLOSS_MAX_UNITS];
@@ -347,7 +348,7 @@ void DiskDriver(char *arg)
     while(!isZapped()){
     	result = waitDevice(USLOSS_DISK_DEV, unit, &status);
     	if (result != 0)
-    		return 0;
+            return;
     	if(status & USLOSS_DEV_READY){
     		// if there are no elements on the q waitAgain on the device
     		if(q == NULL)

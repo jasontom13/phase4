@@ -64,7 +64,7 @@ int DiskWrite(void *diskBuffer, int unit, int track, int first, int sectors, int
 	return (int) sysArg.arg4;
 }
 
-int Sleep(int delay, int *status){
+int Sleep(int delay){
 	// populate the sysargs struct;
 	systemArgs sysArg;
 	sysArg.number = SYS_SLEEP;
