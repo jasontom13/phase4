@@ -225,7 +225,7 @@ static int ClockDriver(char *arg)
 }
 
 /* ------------------------------------------------------------------------
-   Name		-	sleep
+   Name		-	snooze
    Purpose	-   puts a process to sleep for a number of seconds specified
                 by the user
    Params 	-	a struct of arguments; args[1] contains the number of
@@ -270,9 +270,12 @@ void sleepHelper(int seconds){
 // a helper method which adds a clockWaiter object onto the queue
 void clockWaiterAdd(int pid, int seconds){
 	/* compute the wake up time for the process */
-	int wakeUpTime = getTimeOfDayReal() + seconds;
+	int wakeUpTime;
+	getTimeOfDayReal(&wakeUpTime);
+	wakeUpTime += seconds;
 	/* place the process in the wait line */
 	clockWaitLine[getpid() % MAXPROC].PID = getpid();
+	clockWaitLine[getpid() % MAXPROC].secsRemaining = wakeUpTime;
 	struct clockWaiter * position = &clockWaitLine[getpid() % MAXPROC];
 	/* if there are no current waiting processes place at head of queue */
 	if(clockWaiterHead == NULL){
@@ -451,9 +454,9 @@ void diskQueue(int opr, int unit, systemArgs *args, int pid){
 	else{
 		for(;target->next != NULL && target->next->track <= args->arg3 && target->next->first <= args->arg4; target = target->next);
 		if(target->next == NULL)
-			target->next = diskQueueInsert(unit,opr,args,pid,NULL);
+			target->next = diskQueueHelper(unit,opr,args,pid,NULL);
 		else
-			target->next = diskQueueInsert(unit,opr,args,pid,target->next);
+			target->next = diskQueueHelper(unit,opr,args,pid,target->next);
 	}
 }
 

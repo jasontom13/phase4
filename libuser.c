@@ -63,3 +63,13 @@ int DiskWrite(void *diskBuffer, int unit, int track, int first, int sectors, int
 	*status = (int)sysArg.arg1;
 	return (int) sysArg.arg4;
 }
+
+int Sleep(int delay, int *status){
+	// populate the sysargs struct;
+	systemArgs sysArg;
+	sysArg.number = SYS_SLEEP;
+	sysArg.arg1 = delay;
+	// execute the syscall
+	USLOSS_Syscall(&sysArg);
+	return (int) sysArg.arg4;
+}
