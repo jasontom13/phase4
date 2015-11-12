@@ -272,7 +272,7 @@ void sleepHelper(int seconds){
 void clockWaiterAdd(int pid, int seconds){
 	/* compute the wake up time for the process */
 	int wakeUpTime;
-	getTimeOfDayReal(&wakeUpTime);
+	gettimeofdayReal(&wakeUpTime);
 	wakeUpTime += seconds;
 	/* place the process in the wait line */
 	clockWaitLine[getpid() % MAXPROC].PID = getpid();
