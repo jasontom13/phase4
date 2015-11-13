@@ -62,7 +62,6 @@ void start3(void){
     int		pid;
     int		status;
     /* Check kernel mode here. */
-
     /* initialize proctable */
     for(i = getpid(); i < MAXPROC; i++){
     	pFourProcTable[i].status = INACTIVE;
@@ -94,8 +93,10 @@ void start3(void){
     running = semcreateReal(0);
     clockPID = fork1("Clock driver", ClockDriver, NULL, USLOSS_MIN_STACK, 2);
     if (clockPID < 0) {
+
 	USLOSS_Console("start3(): Can't create clock driver\n");
 	USLOSS_Halt(1);
+
     }
     /*
      * Wait for the clock driver to start. The idea is that ClockDriver
@@ -257,8 +258,9 @@ static int ClockDriver(char *arg)
 		char msg[50];
 		//int temp;
 		for(; clockWaiterHead != NULL && clockWaiterHead->secsRemaining <= timeNow; clockWaiterHead = clockWaiterHead->next){
-			if (debugFlag)
+            if (debugFlag){
 				USLOSS_Console("ClockDriver():\tclockWaiterHead time: %d\n\tsystem time: %d\n\ttotal waited time: %d\n", clockWaiterHead->secsRemaining, timeNow, timeNow - clockWaiterHead->secsRemaining);
+            }
 			// if the clockWaiterHead wait time is
 			MboxCondSend(clockWaiterHead->procMbox, msg, 0);
 			if (debugFlag)
@@ -320,7 +322,7 @@ void sleepHelper(int seconds){
 
 	/* add a new entry to the clockWaiter table */
 	if (debugFlag)
-			USLOSS_Console("sleepHelper(): calling helper method.\n");
+			USLOSS_Console("sleepHelper(): calling helper method with seconds : %d.\n", seconds);
 	clockWaiterAdd(getpid(), seconds);
 	/* receive on the clockDriver mbox */
 	if (debugFlag)
@@ -336,12 +338,14 @@ void clockWaiterAdd(int pid, int seconds){
 		USLOSS_Console("clockWaiterAdd(): started.\n\tpid: %d\n\tseconds: %d\n",pid,seconds);
 	/* compute the wake up time for the process */
 	int wakeUpTime;
-	gettimeofdayReal(&wakeUpTime);
+	//gettimeofdayReal(&wakeUpTime);
+    if (debugFlag)
+        USLOSS_Console("clockWaiterAdd(): seconds param: %d\n",seconds);
 	if (debugFlag)
-				USLOSS_Console("clockWaiterAdd(): current time = %d seconds\n",wakeUpTime);
+				USLOSS_Console("clockWaiterAdd(): current time = %d milliseconds\n",wakeUpTime);
 	wakeUpTime += (seconds*1000000);
 	if (debugFlag)
-			USLOSS_Console("clockWaiterAdd(): computed wait time = %d seconds\n",wakeUpTime);
+			USLOSS_Console("clockWaiterAdd(): computed wait time = %d milliseconds\n",wakeUpTime);
 	/* place the process in the wait line */
 	clockWaitLine[getpid() % MAXPROC].PID = getpid();
 	clockWaitLine[getpid() % MAXPROC].procMbox = pFourProcTable[getpid() % MAXPROC].procMbox;
@@ -489,6 +493,7 @@ int diskReadReal(int unit, int track, int first, int sectors, void *buffer){
 		req->reg2 = buffer;
 		USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, req);
 	}
+	return(0);
 }
 
 /* ------------------------------------------------------------------------
@@ -515,6 +520,7 @@ int diskWriteReal(int unit, int track, int first, int sectors, void *buffer){
 		req->reg2 = buffer;
 		USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, req);
 	}
+	return(0);
 }
 
 void diskSizeReal(int unitNum, int * sectorSize, int * numSectors, int * numTracks){
@@ -879,7 +885,9 @@ int termReadReal(char * address, int maxSize, int unitNum){
     int control;
     int result;
     
-    USLOSS_Console("termReadReal(): for unit %d readEnabled = %d\n", unitNum, terminals[unitNum].readEnabled);
+    if(debugFlag){
+        USLOSS_Console("termReadReal(): for unit %d readEnabled = %d\n", unitNum, terminals[unitNum].readEnabled);
+    }
     if(!terminals[unitNum].readEnabled){
         // Turning read interrupts on if it is not already.
         control = 0;
