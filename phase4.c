@@ -48,7 +48,7 @@ int diskOneMutex;
 int diskTwoMutex;
 struct USLOSS_DeviceRequest diskRW;
 int running;
-int debugFlag = 1;
+int debugFlag = 0;
 char * dummyMsg;
 int cleanUp=0;
 /* ------------------------------------------------------------------------ */
@@ -92,16 +92,16 @@ void start3(void){
      * be used instead -- your choice.
      */
     running = semcreateReal(0);
-//    clockPID = fork1("Clock driver", ClockDriver, NULL, USLOSS_MIN_STACK, 2);
-//    if (clockPID < 0) {
-//	USLOSS_Console("start3(): Can't create clock driver\n");
-//	USLOSS_Halt(1);
-//    }
-//    /*
-//     * Wait for the clock driver to start. The idea is that ClockDriver
-//     * will V the semaphore "running" once it is running.
-//     */
-//    sempReal(running);
+    clockPID = fork1("Clock driver", ClockDriver, NULL, USLOSS_MIN_STACK, 2);
+    if (clockPID < 0) {
+	USLOSS_Console("start3(): Can't create clock driver\n");
+	USLOSS_Halt(1);
+    }
+    /*
+     * Wait for the clock driver to start. The idea is that ClockDriver
+     * will V the semaphore "running" once it is running.
+     */
+    sempReal(running);
 
     /*
      * Create the disk device drivers here.  You may need to increase
@@ -217,7 +217,6 @@ void start3(void){
     	//zap(diskPID[i-1]); // 1st disk driver
     }
 
-    
     // eventually, at the end:
     quit(0);
 }
