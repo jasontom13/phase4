@@ -62,7 +62,6 @@ void start3(void){
     int		pid;
     int		status;
     /* Check kernel mode here. */
-
     /* initialize proctable */
     for(i = getpid(); i < MAXPROC; i++){
     	pFourProcTable[i].status = INACTIVE;
@@ -92,11 +91,11 @@ void start3(void){
      * be used instead -- your choice.
      */
     running = semcreateReal(0);
-//    clockPID = fork1("Clock driver", ClockDriver, NULL, USLOSS_MIN_STACK, 2);
-//    if (clockPID < 0) {
-//	USLOSS_Console("start3(): Can't create clock driver\n");
-//	USLOSS_Halt(1);
-//    }
+    clockPID = fork1("Clock driver", ClockDriver, NULL, USLOSS_MIN_STACK, 2);
+    if (clockPID < 0) {
+        USLOSS_Console("start3(): Can't create clock driver\n");
+        USLOSS_Halt(1);
+    }
 //    /*
 //     * Wait for the clock driver to start. The idea is that ClockDriver
 //     * will V the semaphore "running" once it is running.
@@ -307,11 +306,13 @@ void sleepHelper(int seconds){
 			USLOSS_Console("sleepHelper(): started.\n");
 	struct ProcStruct * target = &pFourProcTable[getpid() % MAXPROC];
 	char msg[50];
+    int tempSeconds;
+    tempSeconds = seconds;
 
 	/* add a new entry to the clockWaiter table */
 	if (debugFlag)
-			USLOSS_Console("sleepHelper(): calling helper method.\n");
-	clockWaiterAdd(getpid(), seconds);
+			USLOSS_Console("sleepHelper(): calling helper method with seconds : %d.\n", tempSeconds);
+	clockWaiterAdd(getpid(), tempSeconds);
 	/* receive on the clockDriver mbox */
 	if (debugFlag)
 				USLOSS_Console("sleepHelper(): executing receive on process mbox %d (%d).\n", target->procMbox, getpid());
@@ -327,9 +328,13 @@ void clockWaiterAdd(int pid, int seconds){
 	/* compute the wake up time for the process */
 	int wakeUpTime;
 	gettimeofdayReal(&wakeUpTime);
+    if (debugFlag)
+        USLOSS_Console("clockWaiterAdd(): seconds param %d\n",seconds);
+    if (debugFlag)
+        USLOSS_Console("clockWaiterAdd(): current time = %d milliseconds\n",wakeUpTime);
 	wakeUpTime += (seconds*1000);
 	if (debugFlag)
-			USLOSS_Console("clockWaiterAdd(): computed wait time = %d seconds\n",wakeUpTime);
+			USLOSS_Console("clockWaiterAdd(): computed wait time = %d milliseconds\n",wakeUpTime);
 	/* place the process in the wait line */
 	clockWaitLine[getpid() % MAXPROC].PID = getpid();
 	clockWaitLine[getpid() % MAXPROC].procMbox = pFourProcTable[getpid() % MAXPROC].procMbox;
@@ -864,7 +869,9 @@ int termReadReal(char * address, int maxSize, int unitNum){
     int control;
     int result;
     
-    USLOSS_Console("termReadReal(): for unit %d readEnabled = %d\n", unitNum, terminals[unitNum].readEnabled);
+    if(debugFlag){
+        USLOSS_Console("termReadReal(): for unit %d readEnabled = %d\n", unitNum, terminals[unitNum].readEnabled);
+    }
     if(!terminals[unitNum].readEnabled){
         // Turning read interrupts on if it is not already.
         control = 0;
