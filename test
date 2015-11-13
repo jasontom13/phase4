@@ -1,0 +1,5 @@
+clear; clear
+make clean
+make
+make test$1
+./test$1
