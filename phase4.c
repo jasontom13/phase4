@@ -96,11 +96,11 @@ void start3(void){
         USLOSS_Console("start3(): Can't create clock driver\n");
         USLOSS_Halt(1);
     }
-//    /*
-//     * Wait for the clock driver to start. The idea is that ClockDriver
-//     * will V the semaphore "running" once it is running.
-//     */
-//    sempReal(running);
+    /*
+     * Wait for the clock driver to start. The idea is that ClockDriver
+     * will V the semaphore "running" once it is running.
+     */
+    sempReal(running);
 
     /*
      * Create the disk device drivers here.  You may need to increase
@@ -257,8 +257,9 @@ static int ClockDriver(char *arg)
 		char msg[50];
 		//int temp;
 		for(; clockWaiterHead != NULL && clockWaiterHead->secsRemaining <= timeNow; clockWaiterHead = clockWaiterHead->next){
-			if (debugFlag)
+            if (debugFlag){
 				USLOSS_Console("ClockDriver():\tclockWaiterHead time: %d\n\tsystem time: %d\n\ttotal waited time: %d\n", clockWaiterHead->secsRemaining, timeNow, timeNow - clockWaiterHead->secsRemaining);
+            }
 			// if the clockWaiterHead wait time is
 			MboxCondSend(clockWaiterHead->procMbox, msg, 0);
 			if (debugFlag)
@@ -317,13 +318,11 @@ void sleepHelper(int seconds){
 			USLOSS_Console("sleepHelper(): started.\n");
 	struct ProcStruct * target = &pFourProcTable[getpid() % MAXPROC];
 	char msg[50];
-    int tempSeconds;
-    tempSeconds = seconds;
 
 	/* add a new entry to the clockWaiter table */
 	if (debugFlag)
-			USLOSS_Console("sleepHelper(): calling helper method with seconds : %d.\n", tempSeconds);
-	clockWaiterAdd(getpid(), tempSeconds);
+			USLOSS_Console("sleepHelper(): calling helper method with seconds : %d.\n", seconds);
+	clockWaiterAdd(getpid(), seconds);
 	/* receive on the clockDriver mbox */
 	if (debugFlag)
 				USLOSS_Console("sleepHelper(): executing receive on process mbox %d (%d).\n", target->procMbox, getpid());
@@ -338,9 +337,11 @@ void clockWaiterAdd(int pid, int seconds){
 		USLOSS_Console("clockWaiterAdd(): started.\n\tpid: %d\n\tseconds: %d\n",pid,seconds);
 	/* compute the wake up time for the process */
 	int wakeUpTime;
-	gettimeofdayReal(&wakeUpTime);
+	//gettimeofdayReal(&wakeUpTime);
+    if (debugFlag)
+        USLOSS_Console("clockWaiterAdd(): seconds param: %d\n",seconds);
 	if (debugFlag)
-				USLOSS_Console("clockWaiterAdd(): current time = %d seconds\n",wakeUpTime);
+				USLOSS_Console("clockWaiterAdd(): current time = %d milliseconds\n",wakeUpTime);
 	wakeUpTime += (seconds*1000000);
 	if (debugFlag)
 			USLOSS_Console("clockWaiterAdd(): computed wait time = %d milliseconds\n",wakeUpTime);
