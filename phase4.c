@@ -1,4 +1,4 @@
-#include <usloss.h>
+#include "usloss.h"
 #include <phase1.h>
 #include <phase2.h>
 #include <phase3.h>
@@ -17,21 +17,22 @@ static void	DiskDriver(char *);
 static int TermDriver(char *);
 static int TermReader(char *);
 static int TermWriter(char *);
-void diskSize(systemArgs *args);
 void termRead(systemArgs *args);
 int termReadReal(char * address, int maxSize, int unitNum);
 void termWrite(systemArgs *args);
 long termWriteReal(char * address, int numChars, int unitNum);
+void diskSize(systemArgs *args);
 void diskSizeReal(int unitNum, int * sectorSize, int * numSectors, int * numTracks);
-void snooze(systemArgs *args);
 void diskRead(systemArgs *args);
+int diskReadReal(int unit, int track, int first, int sectors, void *buffer);
 void diskWrite(systemArgs *args);
+int diskWriteReal(int unit, int track, int first, int sectors, void *buffer);
+void diskQueue(int opr, int unit, systemArgs *args, int pid);
+struct diskProc *  diskQueueHelper(int unit, int opr, systemArgs *args, int pid, struct diskProc * next);
 void toUserMode();
 void sleepHelper(int seconds);
 void clockWaiterAdd(int pid, int seconds);
-void diskQueue(int opr, int unit, systemArgs *args, int pid);
-struct diskProc *  diskQueueHelper(int unit, int opr, systemArgs *args, int pid, struct diskProc * next);
-
+void snooze(systemArgs *args);
 /* -------------------------- Globals ------------------------------------- */
 struct Terminal terminals[USLOSS_MAX_UNITS];
 struct ProcStruct pFourProcTable[MAXPROC];
@@ -49,13 +50,11 @@ struct clockWaiter * clockWaiterHead;
 struct clockWaiter * clockWaiterTail;
 struct USLOSS_DeviceRequest diskRW;
 int running;
-int debugFlag = 0;
-
+int debugFlag = 1;
+char * dummyMsg;
 /* ------------------------------------------------------------------------ */
 
-void
-start3(void)
-{
+void start3(void){
     char	name[128];
     char        termbuf[10];
     int		i;
@@ -204,17 +203,25 @@ static int ClockDriver(char *arg)
 
     // Infinite loop until we are zap'd
     while(! isZapped()) {
+    	if (debugFlag)
+    		USLOSS_Console("ClockDriver(): waiting on USLOSS_CLOCK_DEV\n");
         result = waitDevice(USLOSS_CLOCK_DEV, 0, &status);
         if (result != 0)
             return 0;
 		/* Compute the current time and wake up any processes whose time has come. */
 		int timeNow;
 		gettimeofdayReal(&timeNow);
+		if (debugFlag)
+			USLOSS_Console("ClockDriver(): calculating current time: %d\n",timeNow);
 		char msg[50];
 		//int temp;
 		for(; clockWaiterHead != NULL && clockWaiterHead->secsRemaining <= timeNow; clockWaiterHead = clockWaiterHead->next){
+			if (debugFlag)
+				USLOSS_Console("ClockDriver(): clockWaiterHead pid: %d\n\tWith wait time: %d\n",clockWaiterHead->PID, clockWaiterHead->secsRemaining);
+			// if the clockWaiterHead wait time is
 			MboxCondSend(clockWaiterHead->PID, msg, 0);
-			clockWaiterHead->PID = -1;
+			// adjust the head to point to the next process
+			// clockWaiterHead = clockWaiterHead->next;
 		}
 	}
     // Once Zapped, call quit
@@ -225,7 +232,7 @@ static int ClockDriver(char *arg)
 /* ------------------------------------------------------------------------
    Name		-	snooze
    Purpose	-   puts a process to sleep for a number of seconds specified
-                by the user
+                by the userint diskReadReal(int unit, int track, int first, int sectors, void *buffer){
    Params 	-	a struct of arguments; args[1] contains the number of
    	   	   	   	seconds the process will sleep
    Returns	-	placed into 4th position in argument struct; -1 if input
@@ -242,9 +249,13 @@ void snooze(systemArgs *args){
 		return;
 	}
 	/* check to make sure that the specified number of seconds is >= 1 and is an integer */
-	if(!isdigit((int)args->arg1) || (int)args->arg1 < 1){
+	if (debugFlag){
+		USLOSS_Console("sleep(): checking digit: %d\n",args->arg1);
+		USLOSS_Console("sleep(): isdigit evaluates to: %d\n",isdigit((int)args->arg1));
+	}
+	if((int)args->arg1 < 1){
 		if (debugFlag)
-			USLOSS_Console("sleep(): Invalid number of seconds specified for sleep operation: %d.\n", args->arg1);
+			USLOSS_Console("sleep(): Invalid number of seconds specified for sleep operation: %d. %d %d\n", args->arg1, !isdigit((int)args->arg1), (int)args->arg1 < 1);
 		reply = -1;
 	}
 	/* call helper method and assign return value */
@@ -274,41 +285,51 @@ void sleepHelper(int seconds){
 // a helper method which adds a clockWaiter object onto the queue
 void clockWaiterAdd(int pid, int seconds){
 	if (debugFlag)
-			USLOSS_Console("clockWaiterAdd(): started.\n");
+		USLOSS_Console("clockWaiterAdd(): started.\n");
 	/* compute the wake up time for the process */
 	int wakeUpTime;
 	gettimeofdayReal(&wakeUpTime);
 	wakeUpTime += seconds;
 	if (debugFlag)
-		USLOSS_Console("sleepHelper(): calling helper method.\n");
+			USLOSS_Console("clockWaiterAdd(): computed wait time = %d seconds\n",wakeUpTime);
 	/* place the process in the wait line */
 	clockWaitLine[getpid() % MAXPROC].PID = getpid();
 	clockWaitLine[getpid() % MAXPROC].secsRemaining = wakeUpTime;
 	struct clockWaiter * position = &clockWaitLine[getpid() % MAXPROC];
 	/* if there are no current waiting processes place at head of queue */
 	if(clockWaiterHead == NULL){
+		if (debugFlag)
+			USLOSS_Console("clockWaiterAdd(): placing at head of empty queue\n");
 		clockWaiterHead = position;
 	}
 	/* if the current process's wait time is shorter than the head proc's
 	 * waiting time, place the new proc at the head */
 	else if(clockWaiterHead->secsRemaining >= position->secsRemaining){
+		if (debugFlag)
+			USLOSS_Console("clockWaiterAdd(): replacing current head of queue\n");
 		position->next = clockWaiterHead;
 		clockWaiterHead = position;
 	}
 	/* if there is only one current process in the queue, place the new proc
 	 * at the end of the queue */
 	else if(clockWaiterTail == NULL){
+		if (debugFlag)
+			USLOSS_Console("clockWaiterAdd(): placing at end of single-member queue\n");
 		clockWaiterHead->next = position;
 		clockWaiterTail = position;
 	}
 	/* if the current proc's wait time is greater than the tail proc's wait
 	 * time, place the current proc at the tail */
 	else if(clockWaiterTail->secsRemaining <= position->secsRemaining){
+		if (debugFlag)
+			USLOSS_Console("clockWaiterAdd(): replacing process member at end of queue\n");
 		position->next = clockWaiterTail;
 		clockWaiterTail = position;
 	}
 	/* base case: locate the proper position for the current process and insert */
 	else{
+		if (debugFlag)
+			USLOSS_Console("clockWaiterAdd(): placing within queue\n");
 		struct clockWaiter * counter = clockWaiterHead;
 		for(; counter->next->secsRemaining < position->secsRemaining; counter = counter->next);
 		position->next = counter->next;
@@ -325,7 +346,7 @@ void clockWaiterAdd(int pid, int seconds){
    ----------------------------------------------------------------------- */
 void DiskDriver(char *arg)
 {
-	int result, status, unit;
+	int result, status, unit, procPID;
 	int * armPointer;
 	int * diskMutex;
 	struct diskProc * q;
@@ -370,14 +391,18 @@ void DiskDriver(char *arg)
     			*armPointer = q->track;
     		}
     		// execute the first process on the queue
-    		req->opr = q->type;
-    		int iter;
-    		for(iter = 0; iter < q->sectors; iter++){
-    			req->reg1 = q->first + iter;
-    			req->reg2 = q->buffer;
-    			USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, req);
+    		switch(q->type){
+    			case USLOSS_DISK_READ:
+    				diskReadReal(q->unit, q->track, q->first, q->sectors, q->buffer);
+    				break;
+    			case USLOSS_DISK_WRITE:
+    				diskWriteReal(q->unit, q->track, q->first, q->sectors, q->buffer);
+    				break;
+    			default:
+    				break;
     		}
     		//remove the first proc from the queue and exit mutex
+    		procPID = *q->pid;
     		q->pid = DISKPROCEMPTY;
     		if(unit == 1)
     			diskOneHead = diskOneHead->next;
@@ -385,10 +410,89 @@ void DiskDriver(char *arg)
     			diskTwoHead = diskTwoHead->next;
     		// exit mutex
     		semvReal(*diskMutex);
+    		// awaken the process
+    		MboxCondSend(procPID, dummyMsg, NULL);
     	}
     }
     // once zapped, quit
     quit(0);
+}
+
+/* ------------------------------------------------------------------------
+   Name		-   diskReadReal
+   Purpose	-   Reads sectors sectors from the disk indicated by unit,
+                starting at track track and sector first . The sectors are
+                copied into buffer.
+   Params 	-   int unit, int track, int first sector, int number of sectors,
+                void * buffer to read into
+   Returns	-   -1: invalid parameters; 0: sectors were read successfully;
+                >0: disk’s status register
+   Side Effects	- none
+   ----------------------------------------------------------------------- */
+int diskReadReal(int unit, int track, int first, int sectors, void *buffer){
+	struct USLOSS_DeviceRequest * req;
+
+	// select the correct global request object
+	if(unit == 1)
+		req = &diskOneReq;
+	else
+		req = &diskTwoReq;
+	/* if the current arm position is different from the operation track, seek to the requested track
+	if(*armPointer != q->track){
+		req->opr = USLOSS_DISK_SEEK;
+		req->reg1 = q->track;
+		USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, req);
+		*armPointer = q->track;
+	}*/
+	req->opr = USLOSS_DISK_READ;
+	int iter;
+	for(iter = 0; iter < sectors; iter++){
+		req->reg1 = first + iter;
+		req->reg2 = buffer;
+		USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, req);
+	}
+}
+
+/* ------------------------------------------------------------------------
+   Name		-   diskWriteReal
+   Purpose	-   Writes sectors to the disk indicated by unit, starting at
+                track track and sector first . The sectors are copied into
+                buffer.
+   Params 	-   int unit, int track, int first sector, int number of sectors,
+                void * buffer to read into
+   Returns	-   -1: invalid parameters; 0: sectors were written successfully;
+                >0: disk’s status register
+   Side Effects	- none
+   ----------------------------------------------------------------------- */
+int diskWriteReal(int unit, int track, int first, int sectors, void *buffer){
+	struct USLOSS_DeviceRequest * req;
+	// select the correct global request object
+	if(unit == 1)
+			req = &diskOneReq;
+		else
+			req = &diskTwoReq;
+}
+
+void diskSizeReal(int unitNum, int * sectorSize, int * numSectors, int * numTracks){
+    if (debugFlag){
+        USLOSS_Console("diskSizeReal(): started.\n");
+    }
+    /* Getting numTracks */
+    USLOSS_DeviceRequest request;
+    request.opr = USLOSS_DISK_TRACKS;
+    request.reg1 = numTracks;
+    USLOSS_DeviceOutput(USLOSS_DISK_DEV, unitNum, &request);
+
+    /* Getting sectorSize */
+    *sectorSize = 512;
+
+    /* Getting numSectors */
+    *numSectors = 16;
+
+    if (debugFlag){
+        USLOSS_Console("diskSizeReal(): ended.\n");
+    }
+
 }
 
 /* ------------------------------------------------------------------------
@@ -448,19 +552,28 @@ void diskWrite(systemArgs *args){
 // sorts a process onto the appropriate disk queue in circular scan ordering
 void diskQueue(int opr, int unit, systemArgs *args, int pid){
 	struct diskProc * target;
-
+	int * armPos
 	// select the target queue
-	if(unit == 1)
+	if(unit == 1){
 		target = diskOneHead;
-	else
+		armPos = &diskOneArmPos;
+	}else{
 		target = diskTwoHead;
-	/* traverse the queue; if requests are found for similar track numbers, insert request */
+		armPos = &diskTwoArmPos;
+	}
+	/* insert disk opr request based on position of arm and other process requests */
 	// if there are no items currently on the head, insert
 	if(target == NULL)
 		diskOneHead = diskQueueHelper(unit,opr,args,pid,NULL);
 	// otherwise, find the position where the new node will fit
 	else{
+		// if the requested disk proc is less than the current arm position, place the new proc after all those that are after it
+		if(args->arg3 < *armPos)
+			// first track past the processes that are located at or after the arm position
+			for(;target->next != NULL && target->next->track <= USLOSS_DISK_TRACK_SIZE; target = target->next);
+		// then track to the correct position amongst the remaining processes
 		for(;target->next != NULL && target->next->track <= args->arg3 && target->next->first <= args->arg4; target = target->next);
+		// place the new disk request in the appropriate position in line
 		if(target->next == NULL)
 			target->next = diskQueueHelper(unit,opr,args,pid,NULL);
 		else
@@ -468,6 +581,7 @@ void diskQueue(int opr, int unit, systemArgs *args, int pid){
 	}
 }
 
+// helper method places information in appropriate object in disk queue
 struct diskProc *  diskQueueHelper(int unit, int opr, systemArgs *args, int pid, struct diskProc * next){
 	/* Contents of the argument object as follows:
 	 * sysArg.arg1 = diskBuffer;
@@ -486,60 +600,6 @@ struct diskProc *  diskQueueHelper(int unit, int opr, systemArgs *args, int pid,
 	target->first = args->arg4;
 	target->next = next;
 	return target;
-}
-
-/* ------------------------------------------------------------------------
-   Name		-   diskReadReal
-   Purpose	-   Reads sectors sectors from the disk indicated by unit,
-                starting at track track and sector first . The sectors are
-                copied into buffer.
-   Params 	-   int unit, int track, int first sector, int number of sectors,
-                void * buffer to read into
-   Returns	-   -1: invalid parameters; 0: sectors were read successfully;
-                >0: disk’s status register
-   Side Effects	- none
-   ----------------------------------------------------------------------- */
-int diskReadReal(int unit, int track, int first, int sectors, void *buffer){
-	struct USLOSS_DeviceRequest * req;
-	// select the correct global request object
-	if(unit == 1)
-		req = &diskOneReq;
-	else
-		req = &diskTwoReq;
-	// if the current arm position is different from the operation track, seek to the requested track
-	if(*armPointer != q->track){
-		req->opr = USLOSS_DISK_SEEK;
-		req->reg1 = q->track;
-		USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, req);
-		*armPointer = q->track;
-	}
-	req->opr = USLOSS_DISK_READ;
-	int iter;
-	for(iter = 0; iter < sectors; iter++){
-		req->reg1 = first + iter;
-		req->reg2 = ;
-		USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, req);
-	}
-}
-
-/* ------------------------------------------------------------------------
-   Name		-   diskWriteReal
-   Purpose	-   Writes sectors to the disk indicated by unit, starting at
-                track track and sector first . The sectors are copied into
-                buffer.
-   Params 	-   int unit, int track, int first sector, int number of sectors,
-                void * buffer to read into
-   Returns	-   -1: invalid parameters; 0: sectors were written successfully;
-                >0: disk’s status register
-   Side Effects	- none
-   ----------------------------------------------------------------------- */
-int diskWriteReal(int unit, int track, int first, int sectors, void *buffer){
-	struct USLOSS_DeviceRequest * req;
-	// select the correct global request object
-	if(unit == 1)
-			req = &diskOneReq;
-		else
-			req = &diskTwoReq;
 }
 
 void diskSize(systemArgs *args){
@@ -563,28 +623,6 @@ void diskSize(systemArgs *args){
     args->arg1 = (void *)(long)sectorSize;
     args->arg2 = (void *)(long)numSectors;
     args->arg3 = (void *)(long)numTracks;
-}
-
-void diskSizeReal(int unitNum, int * sectorSize, int * numSectors, int * numTracks){
-    if (debugFlag){
-        USLOSS_Console("diskSizeReal(): started.\n");
-    }
-    /* Getting numTracks */
-    USLOSS_DeviceRequest request;
-    request.opr = USLOSS_DISK_TRACKS;
-    request.reg1 = numTracks;
-    USLOSS_DeviceOutput(USLOSS_DISK_DEV, unitNum, &request);
-    
-    /* Getting sectorSize */
-    *sectorSize = 512;
-    
-    /* Getting numSectors */
-    *numSectors = 16;
-    
-    if (debugFlag){
-        USLOSS_Console("diskSizeReal(): ended.\n");
-    }
-    
 }
 
 static int TermDriver(char * arg){
