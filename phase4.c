@@ -10,7 +10,6 @@
 #include <provided_prototypes.h>
 #include <ctype.h>
 
-
 /* ------------------------- Prototypes ----------------------------------- */
 static int	ClockDriver(char *);
 static void	DiskDriver(char *);
@@ -51,6 +50,7 @@ struct USLOSS_DeviceRequest diskRW;
 int running;
 int debugFlag = 1;
 char * dummyMsg;
+int cleanUp=0;
 /* ------------------------------------------------------------------------ */
 
 void start3(void){
@@ -124,8 +124,9 @@ void start3(void){
 //    sempReal(running);
 
     //char unitNum[50];
-    /* Create terminal device drivers. */
+    /* Create terminal device drivers. *
     for(i=0; i < USLOSS_TERM_UNITS; i++){
+
         sprintf(name, "Terminal Driver #%d", i);
         sprintf(termbuf, "%d", i);
         
@@ -168,6 +169,7 @@ void start3(void){
     if (debugFlag)
     		USLOSS_Console("start3(): returned from wait\n");
 
+    cleanUp=1;
     /*
      * Zap the device drivers
      */
@@ -202,8 +204,18 @@ void start3(void){
     zap(clockPID);  // clock driver
     if (debugFlag)
         		USLOSS_Console("start3(): zapping disk drivers.\n");
-    zap(diskPID[0]); // 1st disk driver
-    zap(diskPID[1]); // 2nd disk driver
+    struct USLOSS_DeviceRequest * req;
+    for(i = 1; i <= USLOSS_DISK_UNITS; i++){
+    	if(i == 0)
+    			req = &diskOneReq;
+    		else
+    			req = &diskTwoReq;
+    	req->opr = USLOSS_DISK_SEEK;
+		req->reg1 = 1;
+		USLOSS_DeviceOutput(USLOSS_DISK_DEV, i, req);
+    	//zap(diskPID[i-1]); // 1st disk driver
+    }
+
     
     // eventually, at the end:
     quit(0);
@@ -246,7 +258,7 @@ static int ClockDriver(char *arg)
 		//int temp;
 		for(; clockWaiterHead != NULL && clockWaiterHead->secsRemaining <= timeNow; clockWaiterHead = clockWaiterHead->next){
 			if (debugFlag)
-				USLOSS_Console("ClockDriver(): clockWaiterHead pid: %d\n\tWith wait time: %d\n",clockWaiterHead->PID, clockWaiterHead->secsRemaining);
+				USLOSS_Console("ClockDriver():\tclockWaiterHead time: %d\n\tsystem time: %d\n\ttotal waited time: %d\n", clockWaiterHead->secsRemaining, timeNow, timeNow - clockWaiterHead->secsRemaining);
 			// if the clockWaiterHead wait time is
 			MboxCondSend(clockWaiterHead->procMbox, msg, 0);
 			if (debugFlag)
@@ -284,7 +296,6 @@ void snooze(systemArgs *args){
 	/* check to make sure that the specified number of seconds is >= 1 and is an integer */
 	if (debugFlag){
 		USLOSS_Console("snooze(): checking digit: %d\n",args->arg1);
-		USLOSS_Console("snooze(): isdigit evaluates to: %d\n",isdigit((int)args->arg1));
 	}
 	if((int)args->arg1 < 1){
 		if (debugFlag)
@@ -324,15 +335,13 @@ void sleepHelper(int seconds){
 // a helper method which adds a clockWaiter object onto the queue
 void clockWaiterAdd(int pid, int seconds){
 	if (debugFlag)
-		USLOSS_Console("clockWaiterAdd(): started.\n");
+		USLOSS_Console("clockWaiterAdd(): started.\n\tpid: %d\n\tseconds: %d\n",pid,seconds);
 	/* compute the wake up time for the process */
 	int wakeUpTime;
 	gettimeofdayReal(&wakeUpTime);
-    if (debugFlag)
-        USLOSS_Console("clockWaiterAdd(): seconds param %d\n",seconds);
-    if (debugFlag)
-        USLOSS_Console("clockWaiterAdd(): current time = %d milliseconds\n",wakeUpTime);
-	wakeUpTime += (seconds*1000);
+	if (debugFlag)
+				USLOSS_Console("clockWaiterAdd(): current time = %d seconds\n",wakeUpTime);
+	wakeUpTime += (seconds*1000000);
 	if (debugFlag)
 			USLOSS_Console("clockWaiterAdd(): computed wait time = %d milliseconds\n",wakeUpTime);
 	/* place the process in the wait line */
@@ -405,6 +414,9 @@ void DiskDriver(char *arg)
     	result = waitDevice(USLOSS_DISK_DEV, unit, &status);
     	if (result != 0)
             return;
+    	if(cleanUp){
+    		quit(0);
+    	}
     	if(status & USLOSS_DEV_READY){
     		// if there are no elements on the q waitAgain on the device
     		if(q == NULL)
