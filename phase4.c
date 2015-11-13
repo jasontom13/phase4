@@ -471,6 +471,12 @@ int diskWriteReal(int unit, int track, int first, int sectors, void *buffer){
 			req = &diskOneReq;
 		else
 			req = &diskTwoReq;
+	int iter;
+	for(iter = 0; iter < sectors; iter++){
+		req->reg1 = first + iter;
+		req->reg2 = buffer;
+		USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, req);
+	}
 }
 
 void diskSizeReal(int unitNum, int * sectorSize, int * numSectors, int * numTracks){
