@@ -11,6 +11,7 @@ CSRCS = ${COBJS:.o=.c}
 PHASE3LIB = patrickphase3
 PHASE1LIB = patrickphase1debug
 PHASE2LIB = patrickphase2debug
+#PHASE3LIB = patrickphase3debug
 
 HDRS = libuser.h sems.h phase1.h phase2.h phase3.h phase4.h usloss.h usyscall.h provided_prototypes.h
 

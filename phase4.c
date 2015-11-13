@@ -92,16 +92,16 @@ void start3(void){
      * be used instead -- your choice.
      */
     running = semcreateReal(0);
-    clockPID = fork1("Clock driver", ClockDriver, NULL, USLOSS_MIN_STACK, 2);
-    if (clockPID < 0) {
-	USLOSS_Console("start3(): Can't create clock driver\n");
-	USLOSS_Halt(1);
-    }
-    /*
-     * Wait for the clock driver to start. The idea is that ClockDriver
-     * will V the semaphore "running" once it is running.
-     */
-    sempReal(running);
+//    clockPID = fork1("Clock driver", ClockDriver, NULL, USLOSS_MIN_STACK, 2);
+//    if (clockPID < 0) {
+//	USLOSS_Console("start3(): Can't create clock driver\n");
+//	USLOSS_Halt(1);
+//    }
+//    /*
+//     * Wait for the clock driver to start. The idea is that ClockDriver
+//     * will V the semaphore "running" once it is running.
+//     */
+//    sempReal(running);
 
     /*
      * Create the disk device drivers here.  You may need to increase
@@ -113,43 +113,44 @@ void start3(void){
     diskOneMutex = semcreateReal(0);
     diskTwoMutex = semcreateReal(0);
 
-    for (i = 0; i < DISK_UNITS; i++) {
-        sprintf(name, "Disk Driver #%d", i);
-        diskPID[i] = fork1(name, DiskDriver, NULL, USLOSS_MIN_STACK, 2);
-        if (diskPID[i] < 0) {
-            USLOSS_Console("start3(): Can't create disk driver %d\n", i+1);
-            USLOSS_Halt(1);
-        }
-    }
-    sempReal(running);
-    sempReal(running);
+//    for (i = 0; i < DISK_UNITS; i++) {
+//        sprintf(name, "Disk Driver #%d", i);
+//        pid = fork1(name, DiskDriver, NULL, USLOSS_MIN_STACK, 2);
+//        if (pid < 0) {
+//            USLOSS_Console("start3(): Can't create disk driver %d\n", i+1);
+//            USLOSS_Halt(1);
+//        }
+//    }
+//    sempReal(running);
+//    sempReal(running);
 
     //char unitNum[50];
     /* Create terminal device drivers. *
     for(i=0; i < USLOSS_TERM_UNITS; i++){
-        sprintf(name, "Terminal Driver #%d", i+1);
-        sprintf(termbuf, "%d", i+1unit);
+
+        sprintf(name, "Terminal Driver #%d", i);
+        sprintf(termbuf, "%d", i);
         
     	pid = fork1(name, TermDriver, termbuf, USLOSS_MIN_STACK, 2);
     	if (pid < 0) {
-			USLOSS_Console("start3(): Can't create terminal driver %d\n", i+1);
+			USLOSS_Console("start3(): Can't create terminal driver %d\n", i);
 			USLOSS_Halt(1);
 		}
-        terminals[i+1].pid = pid;
+        terminals[i].pid = pid;
         sprintf(name, "Terminal Reader #%d", i);
         pid = fork1(name, TermReader, termbuf, USLOSS_MIN_STACK, 2);
         if (pid < 0) {
-            USLOSS_Console("start3(): Can't create terminal reader %d\n", i+1);
+            USLOSS_Console("start3(): Can't create terminal reader %d\n", i);
             USLOSS_Halt(1);
         }
-        terminals[i+1].readerPid = pid;
+        terminals[i].readerPid = pid;
         sprintf(name, "Terminal Writer #%d", i);
         pid = fork1(name, TermWriter, termbuf, USLOSS_MIN_STACK, 2);
         if (pid < 0) {
-            USLOSS_Console("start3(): Can't create terminal writer %d\n", i+1);
+            USLOSS_Console("start3(): Can't create terminal writer %d\n", i);
             USLOSS_Halt(1);
         }
-        terminals[i+1].writerPid = pid;
+        terminals[i].writerPid = pid;
         sempReal(running);
         sempReal(running);
         sempReal(running);
@@ -176,6 +177,12 @@ void start3(void){
     /*
     // Terminals
     for (i=0; i< USLOSS_TERM_UNITS; i++){
+        MboxSend(terminals[i].writeBox, "", 0);
+        zap(terminals[i].writerPid);
+        MboxSend(terminals[i].inBox, "", 0);
+        zap(terminals[i].readerPid);
+        
+        zap(terminals[i].pid);
         MboxSend(terminals[i+1].writeBox, "", 0);
         if (debugFlag)
             		USLOSS_Console("start3(): coming back from first Mbox send.\n");
@@ -664,6 +671,9 @@ void diskSize(systemArgs *args){
 }
 
 static int TermDriver(char * arg){
+    if (debugFlag){
+        USLOSS_Console("TermDriver(): process starting up!\n");
+    }
     int status;
     int unit = atoi( (char *) arg);
     int inBox;
@@ -673,19 +683,40 @@ static int TermDriver(char * arg){
     int result;
     int recv;
     int xmit;
+//    int control;
+//    control = 0;
+//    control = USLOSS_TERM_CTRL_RECV_INT(control);
+//    if (debugFlag){
+//        USLOSS_Console("TermDriver(): control %d!\n", control);
+//    }
+//    result = USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, control);
+//    if (debugFlag){
+//        USLOSS_Console("TermDriver(): result %d!\n", result);
+//    }
+//    terminals[unit].readEnabled = 1;
+//    if (debugFlag){
+//        USLOSS_Console("TermDriver(): read enabled for unit %d is %d!\n", unit, terminals[unit].readEnabled);
+//    }
     mutexBox = MboxCreate(1, MAXLINE);
-    inBox = MboxCreate(1, MAX_MESSAGE);
-    outBox = MboxCreate(1, MAX_MESSAGE);
+    inBox = MboxCreate(1, MAXLINE);
+    outBox = MboxCreate(1, MAXLINE);
     writeBox = MboxCreate(1, MAXLINE);
     terminals[unit].inBox = inBox;
     terminals[unit].outBox = outBox;
     terminals[unit].mutexBox = mutexBox;
     terminals[unit].readEnabled = 0;
     
+    
+    if (debugFlag){
+        USLOSS_Console("TermDriver(): finished set up for unit %d!\n", unit);
+    }
     // Finished initialization
     semvReal(running);
     
     while(!isZapped()){
+        if(debugFlag){
+            USLOSS_Console("TermDriver(): Before waitDevice\n");
+        }
         result = waitDevice(USLOSS_TERM_DEV, unit ,&status);
         if(result!=0){
             if(debugFlag){
@@ -693,15 +724,34 @@ static int TermDriver(char * arg){
             }
             quit(0);
         }
+        if(debugFlag){
+            USLOSS_Console("TermDriver(): After waitDevice\n");
+        }
         // If received char, send to char in Box
         recv = USLOSS_TERM_STAT_RECV(status);
+
         if(recv == USLOSS_DEV_BUSY){
-            MboxSend(terminals[unit].inBox, (void *)(long)USLOSS_TERM_STAT_CHAR(status), 1);
+            if (debugFlag){
+                USLOSS_Console("TermDriver(): recv == USLOSS_DEV_BUSY\n");
+            }
+            char x;
+            x = USLOSS_TERM_STAT_CHAR(status);
+            if (debugFlag){
+                USLOSS_Console("TermDriver(): char read is \'%c\'\n", x);
+            }
+    
+            MboxSend(terminals[unit].inBox, &status, sizeof(int));
         }
         xmit = USLOSS_TERM_STAT_XMIT(status);
         // If sent char, send result to char out Box
         if(xmit == USLOSS_DEV_READY){
-            MboxSend(terminals[unit].outBox, (void *)(long)USLOSS_TERM_STAT_CHAR(status), 1);
+            if (debugFlag){
+                USLOSS_Console("TermDriver(): xmit == USLOSS_DEV_READY\n");
+            }
+            MboxSend(terminals[unit].outBox, &status, sizeof(int));
+        }
+        if(debugFlag){
+            USLOSS_Console("TermDriver(): After sends\n");
         }
     }
     
@@ -710,24 +760,40 @@ static int TermDriver(char * arg){
 }
 
 static int TermReader(char * arg){
+    if (debugFlag){
+        USLOSS_Console("TermReader(): process starting up!\n");
+    }
     int unit = atoi( (char *) arg);
     char msg[MAXLINE];
     int i=0;
     int charsRead = 0;
-    char * temp;
+    char temp;
+    void * status;
     int bufferBox;
     bufferBox = MboxCreate(10, MAX_MESSAGE);
     terminals[unit].bufferBox = bufferBox;
+    
+    if (debugFlag){
+        USLOSS_Console("TermReader(): finished setup!\n");
+    }
     
     // Finished initialization
     semvReal(running);
     
     // Get the full line from mailBox
     while(!isZapped()){
-        MboxReceive(terminals[unit].inBox, temp, 1);
-        if(charsRead >= MAXLINE || *temp == '\n'){
+        if (debugFlag){
+            USLOSS_Console("TermReader(): blocking on inBox\n");
+        }
+        MboxReceive(terminals[unit].inBox, &status, sizeof(int));
+        temp = USLOSS_TERM_STAT_CHAR((int)status);
+        if (debugFlag){
+            USLOSS_Console("HERE\n");
+            USLOSS_Console("TermReader(): after receive on inBox, got \'%c\'\n", temp);
+        }
+        if(charsRead >= MAXLINE || temp == '\n'){
             if(debugFlag){
-                USLOSS_Console("termReadReal(): finished reading line: ");
+                USLOSS_Console("TermReader(): finished reading line: ");
                 int j = 0;
                 for(j=0;j<strlen(msg);j++){
                     USLOSS_Console("%c", msg[j]);
@@ -741,9 +807,15 @@ static int TermReader(char * arg){
             i=0;
         }
         else{
-            msg[i] = *temp;
+            USLOSS_Console("TermReader(): adding next char\n");
+            msg[i] = temp;
             i++;
             charsRead++;
+            int j = 0;
+            for(j=0;j<strlen(msg);j++){
+                USLOSS_Console("%c", msg[j]);
+            }
+            USLOSS_Console("\n");
         }
     }
 }
@@ -789,6 +861,10 @@ void termRead(systemArgs *args){
 
 int termReadReal(char * address, int maxSize, int unitNum){
     
+    if (debugFlag){
+        USLOSS_Console("TermReadReal(): started\n");
+    }
+    
     if(unitNum>USLOSS_MAX_UNITS ){
         if (debugFlag){
             USLOSS_Console("termReadReal(): Tried to use terminal outside of max units. # %d\n", unitNum);
@@ -804,16 +880,21 @@ int termReadReal(char * address, int maxSize, int unitNum){
     int control;
     int result;
     
+    USLOSS_Console("termReadReal(): for unit %d readEnabled = %d\n", unitNum, terminals[unitNum].readEnabled);
     if(!terminals[unitNum].readEnabled){
         // Turning read interrupts on if it is not already.
-        for(i=0;i<USLOSS_TERM_UNITS;i++){
-            control = 0;
-            control = USLOSS_TERM_CTRL_RECV_INT(control);
-            result = USLOSS_DeviceOutput(USLOSS_TERM_DEV, i+1, control);
-        }
+        control = 0;
+        control = USLOSS_TERM_CTRL_RECV_INT(control);
+        result = USLOSS_DeviceOutput(USLOSS_TERM_DEV, unitNum, control);
         terminals[unitNum].readEnabled = 1;
+        if (debugFlag){
+            USLOSS_Console("termReadReal(): Terminal %d enabled read\n", unitNum);
+        }
     }
     
+    if (debugFlag){
+        USLOSS_Console("TermReadReal(): HERE\n");
+    }
     MboxReceive(terminals[unitNum].bufferBox, msg, maxSize);
     temp = msg;
     
@@ -879,21 +960,30 @@ int termReadReal(char * address, int maxSize, int unitNum){
 
 static int TermWriter(char * arg){
     
+    if (debugFlag){
+        USLOSS_Console("TermWriter(): process starting up!\n");
+    }
+    
     int unit = atoi( (char *) arg);
     char * line;
     long charsWritten = 0;
     
+    if (debugFlag){
+        USLOSS_Console("TermWriter(): finished set up!\n");
+    }
     semvReal(running);
     
     while(!isZapped()){
         MboxReceive(terminals[unit].writeBox, line, MAXLINE);
         // Setting the xmit int enable bit
         int control = 0;
+        int result = 0;
         control = USLOSS_TERM_CTRL_XMIT_INT(control);
         USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, control);
-        char * temp;
+        char temp;
+        void * status;
         while(1){
-            MboxReceive(terminals[unit].outBox, temp, MAXLINE);
+            MboxReceive(terminals[unit].outBox, &status, sizeof(int));
             control = USLOSS_TERM_CTRL_CHAR(control, *line);
             control = USLOSS_TERM_CTRL_XMIT_CHAR(control);
             USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, control);
@@ -907,8 +997,12 @@ static int TermWriter(char * arg){
             charsWritten++;
         }
         // Disabling CTRL XMIT
-        control = USLOSS_TERM_CTRL_XMIT_INT_DISABLE(control);
-        USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, control);
+        
+        control = 0;
+        control = USLOSS_TERM_CTRL_RECV_INT(control);
+        result = USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, (void *) (long)control);
+        terminals[unit].readEnabled = 1;
+        //control = USLOSS_TERM_CTRL_XMIT_INT_DISABLE(control);
         
         MboxSend(terminals[unit].mutexBox, (void *)charsWritten, 1);
     }  
