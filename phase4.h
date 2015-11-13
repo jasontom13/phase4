@@ -76,6 +76,7 @@ struct diskProc {
 
 struct clockWaiter{
 	int PID;
+	int procMbox;
 	int secsRemaining;
 	struct clockWaiter * next;
 }clockWaiter;
