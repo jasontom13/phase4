@@ -65,6 +65,7 @@ void start3(void){
     int		pid;
     int		status;
     /* Check kernel mode here. */
+
     /* initialize proctable */
     for(i = getpid(); i < MAXPROC; i++){
     	pFourProcTable[i].status = INACTIVE;
@@ -96,10 +97,8 @@ void start3(void){
     running = semcreateReal(0);
     clockPID = fork1("Clock driver", ClockDriver, NULL, USLOSS_MIN_STACK, 2);
     if (clockPID < 0) {
-
 	USLOSS_Console("start3(): Can't create clock driver\n");
 	USLOSS_Halt(1);
-
     }
     /*
      * Wait for the clock driver to start. The idea is that ClockDriver
@@ -134,7 +133,7 @@ void start3(void){
     sempReal(running);
 
     //char unitNum[50];
-    /* Create terminal device drivers. *
+    /* Create terminal device drivers. */
     for(i=0; i < USLOSS_TERM_UNITS; i++){
 
         sprintf(name, "Terminal Driver #%d", i);
@@ -183,32 +182,45 @@ void start3(void){
     /*
      * Zap the device drivers
      */
-    /*
+    
+    char data[MAXLINE];
+    int len;
     // Terminals
     for (i=0; i< USLOSS_TERM_UNITS; i++){
         MboxSend(terminals[i].writeBox, "", 0);
-        zap(terminals[i].writerPid);
+        //zap(terminals[i].writerPid);
         MboxSend(terminals[i].inBox, "", 0);
-        zap(terminals[i].readerPid);
-        
+        //zap(terminals[i].readerPid);
+        int control;
+        int result;
+        control = 0;
+        control = USLOSS_TERM_CTRL_RECV_INT(control);
+        result = USLOSS_DeviceOutput(USLOSS_TERM_DEV, i, control);
         zap(terminals[i].pid);
-        MboxSend(terminals[i+1].writeBox, "", 0);
+        
+//        FILE * fp;
+//        
+//        fp = fopen ("file.txt", "w+");
+//        fprintf(fp, "%s %s %s %d", "We", "are", "in", 2012);
+//        
+//        fclose(fp);
+        //zap(terminals[i].pid);
         if (debugFlag)
             		USLOSS_Console("start3(): coming back from first Mbox send.\n");
-        zap(terminals[i+1].writerPid);
+        //zap(terminals[i+1].writerPid);
         if (debugFlag)
             		USLOSS_Console("start3(): finished zapping first terminal\n");
-        MboxSend(terminals[i+1].inBox, "", 0);
-        zap(terminals[i+1].readerPid);
-        
-        zap(terminals[i+1].pid);
+//        MboxSend(terminals[i+1].inBox, "", 0);
+//        zap(terminals[i+1].readerPid);
+//        
+//        zap(terminals[i+1].pid);
 
-        if (debugFlag)
-            		USLOSS_Console("start3(): doing three joins.\n");
-        join(&status);
-        join(&status);
-        join(&status);
-    }*/
+//        if (debugFlag)
+//            		USLOSS_Console("start3(): doing three joins.\n");
+//        join(&status);
+//        join(&status);
+//        join(&status);
+    }
     if (debugFlag)
     		USLOSS_Console("start3(): zapping clock driver.\n");
     zap(clockPID);  // clock driver
@@ -266,9 +278,8 @@ static int ClockDriver(char *arg)
 		char msg[50];
 		//int temp;
 		for(; clockWaiterHead != NULL && clockWaiterHead->secsRemaining <= timeNow; clockWaiterHead = clockWaiterHead->next){
-            if (debugFlag){
+			if (debugFlag)
 				USLOSS_Console("ClockDriver():\tclockWaiterHead time: %d\n\tsystem time: %d\n\ttotal waited time: %d\n", clockWaiterHead->secsRemaining, timeNow, timeNow - clockWaiterHead->secsRemaining);
-            }
 			// if the clockWaiterHead wait time is
 			MboxCondSend(clockWaiterHead->procMbox, msg, 0);
 			if (debugFlag)
@@ -330,7 +341,7 @@ void sleepHelper(int seconds){
 
 	/* add a new entry to the clockWaiter table */
 	if (debugFlag)
-			USLOSS_Console("sleepHelper(): calling helper method with seconds : %d.\n", seconds);
+			USLOSS_Console("sleepHelper(): calling helper method.\n");
 	clockWaiterAdd(getpid(), seconds);
 	/* receive on the clockDriver mbox */
 	if (debugFlag)
@@ -346,14 +357,12 @@ void clockWaiterAdd(int pid, int seconds){
 		USLOSS_Console("clockWaiterAdd(): started.\n\tpid: %d\n\tseconds: %d\n",pid,seconds);
 	/* compute the wake up time for the process */
 	int wakeUpTime;
-	//gettimeofdayReal(&wakeUpTime);
-    if (debugFlag)
-        USLOSS_Console("clockWaiterAdd(): seconds param: %d\n",seconds);
+	gettimeofdayReal(&wakeUpTime);
 	if (debugFlag)
-				USLOSS_Console("clockWaiterAdd(): current time = %d milliseconds\n",wakeUpTime);
+				USLOSS_Console("clockWaiterAdd(): current time = %d seconds\n",wakeUpTime);
 	wakeUpTime += (seconds*1000000);
 	if (debugFlag)
-			USLOSS_Console("clockWaiterAdd(): computed wait time = %d milliseconds\n",wakeUpTime);
+			USLOSS_Console("clockWaiterAdd(): computed wait time = %d seconds\n",wakeUpTime);
 	/* place the process in the wait line */
 	clockWaitLine[getpid() % MAXPROC].PID = getpid();
 	clockWaitLine[getpid() % MAXPROC].procMbox = pFourProcTable[getpid() % MAXPROC].procMbox;
@@ -521,7 +530,6 @@ int diskReadReal(int unit, int track, int first, int sectors, void *buffer){
 			memcpy(buffer + iter*512, fetch,512);
 		}
 	}
-	return(0);
 }
 
 /* ------------------------------------------------------------------------
@@ -560,7 +568,6 @@ int diskWriteReal(int unit, int track, int first, int sectors, void *buffer){
 		}
 
 	}
-	return(0);
 }
 
 void diskSizeReal(int unitNum, int * sectorSize, int * numSectors, int * numTracks){
@@ -735,7 +742,7 @@ void diskSize(systemArgs *args){
 
 static int TermDriver(char * arg){
     if (debugFlag){
-        USLOSS_Console("TermDriver(): process starting up!\n");
+        USLOSS_Console("TermDriver(): process %d starting up!\n", getpid());
     }
     int status;
     int unit = atoi( (char *) arg);
@@ -767,6 +774,7 @@ static int TermDriver(char * arg){
     terminals[unit].inBox = inBox;
     terminals[unit].outBox = outBox;
     terminals[unit].mutexBox = mutexBox;
+    terminals[unit].writeBox = writeBox;
     terminals[unit].readEnabled = 0;
     
     
@@ -781,15 +789,22 @@ static int TermDriver(char * arg){
             USLOSS_Console("TermDriver(): Before waitDevice\n");
         }
         result = waitDevice(USLOSS_TERM_DEV, unit ,&status);
+        if(debugFlag){
+            USLOSS_Console("TermDriver(): After waitDevice\n");
+        }
         if(result!=0){
             if(debugFlag){
                 USLOSS_Console("TermDriver(): The result was not equal to zero, quitting..\n");
             }
             quit(0);
         }
-        if(debugFlag){
-            USLOSS_Console("TermDriver(): After waitDevice\n");
+        if(cleanUp){
+            if(debugFlag){
+                USLOSS_Console("TermDriver(): cleaning up unit %d.\n", unit);
+            }
+            quit(0);
         }
+
         // If received char, send to char in Box
         recv = USLOSS_TERM_STAT_RECV(status);
 
@@ -811,7 +826,7 @@ static int TermDriver(char * arg){
             if (debugFlag){
                 USLOSS_Console("TermDriver(): xmit == USLOSS_DEV_READY\n");
             }
-            MboxSend(terminals[unit].outBox, &status, sizeof(int));
+            //MboxSend(terminals[unit].outBox, &status, sizeof(int));
         }
         if(debugFlag){
             USLOSS_Console("TermDriver(): After sends\n");
@@ -824,7 +839,7 @@ static int TermDriver(char * arg){
 
 static int TermReader(char * arg){
     if (debugFlag){
-        USLOSS_Console("TermReader(): process starting up!\n");
+        USLOSS_Console("TermReader(): process %d starting up!\n", getpid());
     }
     int unit = atoi( (char *) arg);
     char msg[MAXLINE];
@@ -833,7 +848,7 @@ static int TermReader(char * arg){
     char temp;
     void * status;
     int bufferBox;
-    bufferBox = MboxCreate(10, MAX_MESSAGE);
+    bufferBox = MboxCreate(10, MAXLINE);
     terminals[unit].bufferBox = bufferBox;
     
     if (debugFlag){
@@ -846,12 +861,17 @@ static int TermReader(char * arg){
     // Get the full line from mailBox
     while(!isZapped()){
         if (debugFlag){
-            USLOSS_Console("TermReader(): blocking on inBox\n");
+            USLOSS_Console("TermReader(): pid: %d blocking on inBox\n", getpid());
         }
         MboxReceive(terminals[unit].inBox, &status, sizeof(int));
+        if(cleanUp){
+            if(debugFlag){
+                USLOSS_Console("TermReader(): cleaning up\n");
+            }
+            quit(0);
+        }
         temp = USLOSS_TERM_STAT_CHAR((int)status);
         if (debugFlag){
-            USLOSS_Console("HERE\n");
             USLOSS_Console("TermReader(): after receive on inBox, got \'%c\'\n", temp);
         }
         if(charsRead >= MAXLINE || temp == '\n'){
@@ -863,22 +883,32 @@ static int TermReader(char * arg){
                 }
                 USLOSS_Console("\n");
             }
-            MboxCondSend(terminals[unit].bufferBox, msg, charsRead);
+            if(debugFlag){
+                USLOSS_Console("TermReader(): Sending to bufferBox %d, charsRead: %d\n", terminals[unit].bufferBox,charsRead);
+            }
+            msg[i]=temp;
+            i++;
+            charsRead++;
+            MboxCondSend(terminals[unit].bufferBox, &msg, charsRead);
             // Clearing out the msg buffer after send
             memset(msg, '\0', MAXLINE);
             charsRead = 0;
             i=0;
         }
         else{
-            USLOSS_Console("TermReader(): adding next char\n");
+            if(debugFlag){
+                USLOSS_Console("TermReader(): adding next char\n");
+            }
             msg[i] = temp;
             i++;
             charsRead++;
-            int j = 0;
-            for(j=0;j<strlen(msg);j++){
-                USLOSS_Console("%c", msg[j]);
+            if (debugFlag){
+                int j = 0;
+                for(j=0;j<strlen(msg);j++){
+                    USLOSS_Console("%c", msg[j]);
+                }
+                USLOSS_Console("\n");
             }
-            USLOSS_Console("\n");
         }
     }
 }
@@ -912,13 +942,15 @@ void termRead(systemArgs *args){
     unitNum = (int)args->arg3;
     
     // Check unit number validity and line length validity
-    if(unitNum > USLOSS_MAX_UNITS-1 || maxSize > MAXLINE){
+    if(unitNum > USLOSS_MAX_UNITS-1 || unitNum<0 ||maxSize > MAXLINE || maxSize<0){
         args->arg4 = (void *)(long)-1;
+        return;
     }
     
     int charsRead;
     charsRead = termReadReal(address, maxSize, unitNum);
     args -> arg2 = (void *)(long)charsRead;
+    args->arg4 = (void *)(long)0;
     
 }
 
@@ -938,7 +970,7 @@ int termReadReal(char * address, int maxSize, int unitNum){
     int i=0;
     int charsRead = 0;
     
-    char * msg;
+    char msg[MAXLINE];
     char * temp;
     int control;
     int result;
@@ -958,9 +990,21 @@ int termReadReal(char * address, int maxSize, int unitNum){
     }
     
     if (debugFlag){
-        USLOSS_Console("TermReadReal(): HERE\n");
+        USLOSS_Console("TermReadReal(): Blocking on bufferBox Receive.\n");
     }
-    MboxReceive(terminals[unitNum].bufferBox, msg, maxSize);
+    MboxReceive(terminals[unitNum].bufferBox, msg, MAXLINE);
+    if (debugFlag){
+        USLOSS_Console("TermReadReal(): After bufferBox receive. Msg: ");
+        for(i=0;i<maxSize && msg[i]!='\n';i++){
+            USLOSS_Console("%c",msg[i]);
+        }
+        
+
+        USLOSS_Console("\n");
+    }
+    
+    
+    
     temp = msg;
     
     for(i=0;i<maxSize; i++){
@@ -968,13 +1012,14 @@ int termReadReal(char * address, int maxSize, int unitNum){
             charsRead++;
         }
         else{
+            charsRead++;
             break;
         }
         temp++;
     }
     
     //strcat("\n", msg);
-    strcpy(address, msg);
+    strncpy(address, msg, charsRead);
     
     return charsRead;
     
@@ -1026,7 +1071,7 @@ int termReadReal(char * address, int maxSize, int unitNum){
 static int TermWriter(char * arg){
     
     if (debugFlag){
-        USLOSS_Console("TermWriter(): process starting up!\n");
+        USLOSS_Console("TermWriter(): process %d starting up!\n",getpid());
     }
     
     int unit = atoi( (char *) arg);
@@ -1040,10 +1085,17 @@ static int TermWriter(char * arg){
     
     while(!isZapped()){
         MboxReceive(terminals[unit].writeBox, line, MAXLINE);
+        if(cleanUp){
+            if(debugFlag){
+                USLOSS_Console("TermWriter(): cleaning up.\n");
+            }
+            quit(0);
+        }
         // Setting the xmit int enable bit
         int control = 0;
         int result = 0;
         control = USLOSS_TERM_CTRL_XMIT_INT(control);
+        control = USLOSS_TERM_CTRL_RECV_INT(control);
         USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, control);
         char temp;
         void * status;
@@ -1130,9 +1182,16 @@ void termWrite(systemArgs *args){
     unitNum = (int)args->arg3;
     long numWritten;
     
+    // Check unit number validity and line length validity
+    if(unitNum > USLOSS_TERM_UNITS-1 || unitNum<0 ||numChars > MAXLINE || numChars<0){
+        args->arg4 = (void *)(long)-1;
+        return;
+    }
+    
     numWritten = termWriteReal(address, numChars, unitNum);
     
     args->arg2 = (void *)numWritten;
+    args->arg4 = (void *)(long)0;
 }
 
 long termWriteReal(char * address, int numChars, int unitNum){
