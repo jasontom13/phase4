@@ -51,9 +51,9 @@ int diskTwoMutex;
 int diskTwoQueue;
 struct USLOSS_DeviceRequest diskRW;
 int running;
-int debugFlag = 1;
+int debugFlag = 0;
 char * dummyMsg;
-int cleanUp;
+int cleanUp = 0;
 /* ------------------------------------------------------------------------ */
 
 void start3(void){
@@ -132,7 +132,7 @@ void start3(void){
     }
     sempReal(running);
     sempReal(running);
-    dumpProcesses();
+    //dumpProcesses();
 
     //char unitNum[50];
     /* Create terminal device drivers. */
@@ -200,6 +200,7 @@ void start3(void){
         result = USLOSS_DeviceOutput(USLOSS_TERM_DEV, i, control);
         zap(terminals[i].pid);
         
+
 //        FILE * fp;
 //        
 //        fp = fopen ("file.txt", "w+");
@@ -226,19 +227,12 @@ void start3(void){
     if (debugFlag)
     		USLOSS_Console("start3(): zapping clock driver.\n");
     zap(clockPID);  // clock driver
-    if (debugFlag) USLOSS_Console("start3(): killing disk drivers.\n");
-    // send to the disks' semwait inbox
-    dumpProcesses();
-    if (debugFlag) USLOSS_Console("start3(): sending to disk one sem: %d\n", diskOneQueue);
-    semvReal(diskOneQueue);          // the first disk mbox
-
-
-    if (debugFlag) USLOSS_Console("start3(): sending to disk two\n");
-    semvReal(diskTwoQueue);         // the second disk mboxstart3
-    //zap(diskPID[1]);
+    semvReal(diskOneQueue); // send to the first disk driver
+    semvReal(diskTwoQueue); // send to the second disk driver
+    zap(diskPID[1]);
 
     // eventually, at the end:
-    dumpProcesses();
+    //dumpProcesses();
     quit(0);
 }
 
@@ -439,7 +433,7 @@ void DiskDriver(char *arg)
 		else q = diskTwoHead;
     	if(debugFlag) USLOSS_Console("DiskDriver(): returned from sem; diskOneHead == NULL?: %d\ndiskTwoHead == NULL?: %d\nq == NULL?: %d\n", diskOneHead == NULL, diskTwoHead == NULL, q == NULL);
     	// check if process should quit
-    	if(cleanUp){
+    	if(q == NULL){
     		if (debugFlag) USLOSS_Console("DiskDriver(): ARG\n");
     		quit(0);
     	}
@@ -506,6 +500,7 @@ void DiskDriver(char *arg)
 		MboxCondSend(procMbox, dummyMsg, 0);
     }
     // once zapped, quit
+    if (debugFlag) USLOSS_Console("DiskDriver(): quitting\n");
     quit(0);
 }
 
@@ -542,7 +537,7 @@ int diskReadReal(int unit, int track, int first, int sectors, void *buffer){
 
 	if (debugFlag) USLOSS_Console("diskReadReal(): set up to do read loop\n");
 	for(iter = 0; iter < sectors; iter++){
-		req->reg1 = first + iter;
+		req->reg1 = (first + iter) % USLOSS_DISK_TRACK_SIZE;
 		req->reg2 = buffer + (iter*512);
 		USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, req);
 		result = waitDevice(USLOSS_DISK_DEV, unit, &status);
@@ -575,7 +570,7 @@ int diskWriteReal(int unit, int track, int first, int sectors, void *buffer){
 	int result, status;
 
 	// if any of the arguments passed have illegal values, set arg4 to -1 and return
-	if(first < 0 || first > USLOSS_DISK_TRACK_SIZE || sectors <= 0 || sectors > USLOSS_DISK_TRACKS)
+	if(unit < 0 || unit >= USLOSS_DISK_UNITS || track < 0 || track > USLOSS_DISK_TRACK_SIZE || first < 0 || first > USLOSS_DISK_TRACK_SIZE || sectors < 0 || sectors > USLOSS_DISK_TRACK_SIZE)
 		return(-1);
 	if (debugFlag) USLOSS_Console("diskWrite(): setting request pointer\n");
 	// select the correct global request object
@@ -587,7 +582,7 @@ int diskWriteReal(int unit, int track, int first, int sectors, void *buffer){
 	if (debugFlag) USLOSS_Console("diskWrite(): prepare to write into disk\n");
 	for(iter = 0; iter < sectors; iter++){
 		req->opr = USLOSS_DISK_WRITE;
-		req->reg1 = first + iter;
+		req->reg1 = (first + iter) % USLOSS_DISK_TRACK_SIZE;
 		memcpy(fetch, buffer + iter*512 ,512);
 		req->reg2 = fetch;
 		if (debugFlag) USLOSS_Console("diskWrite(): writing into disk\n");
