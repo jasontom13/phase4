@@ -60,9 +60,6 @@ struct Terminal {
     int readEnabled;
 } Terminal;
 
-// a macro to indicate whether the diskProc position is in use
-#define DISKPROCEMPTY -1
-
 struct diskProc {
 	int pid;                  // pid of the requesting process
 	int unit;                 // number of the unit to use
@@ -70,7 +67,8 @@ struct diskProc {
 	int track;                // specifies the track on which to read/write
 	int first;                // first sector to read
 	int sectors;              // number of sectors to read
-    void *buffer;              // address of the buffer to which to read
+    void *buffer;             // address of the buffer to which to read
+    systemArgs * args;        // pointer to the argument structure
 	struct diskProc * next;
 } diskProc;
 
