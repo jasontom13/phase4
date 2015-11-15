@@ -34,6 +34,16 @@ int TermWrite(char * buffer, int strlen, int unitNum, int *length){
     return (int) sysArg.arg4;
 }
 
+void DiskSize(int unit, int * sectorSize, int *trackSize, int *diskSize){
+    systemArgs sysArg;
+    sysArg.number = SYS_DISKSIZE;
+    sysArg.arg1 = unit;
+    USLOSS_Syscall(&sysArg);
+    *sectorSize = (int) sysArg.arg1;
+    *trackSize = (int) sysArg.arg2;
+    *diskSize  = (int) sysArg.arg3;
+}
+
 int DiskRead(void *diskBuffer, int unit, int track, int first, int sectors, int *status){
 	// populate the sysargs struct;
 	systemArgs sysArg;

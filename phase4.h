@@ -9,6 +9,18 @@
  * Maximum line length
  */
 
+/*
+ * Maximum number of processes.
+ */
+
+#define MAXPROC      50
+
+/*
+ * Maximum length of a process name
+ */
+
+#define MAXNAME      50
+
 #define INACTIVE		0
 #define ACTIVE			1
 #define MAXLINE         80
@@ -58,6 +70,7 @@ struct Terminal {
     int writeBox;
     int mutexBox;
     int readEnabled;
+    int writeSem;
 } Terminal;
 
 // a macro to indicate whether the diskProc position is in use

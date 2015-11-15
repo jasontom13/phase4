@@ -1,5 +1,5 @@
 #include "usloss.h"
-#include <phase1.h>
+#include "phase1.h"
 #include <phase2.h>
 #include <phase3.h>
 #include <phase4.h>
@@ -51,7 +51,8 @@ int diskTwoMutex;
 int diskTwoQueue;
 struct USLOSS_DeviceRequest diskRW;
 int running;
-int debugFlag = 1;
+int debugFlag = 0;
+int df = 1;
 char * dummyMsg;
 int cleanUp=0;
 /* ------------------------------------------------------------------------ */
@@ -119,18 +120,18 @@ void start3(void){
     diskTwoQueue = semcreateReal(0);
 
 
-    for (i = 0; i < DISK_UNITS; i++) {
-        sprintf(name, "Disk Driver #%d", i);
-        if (debugFlag)
-			USLOSS_Console("start3(): Forking disk driver\t%d\tunder name %s\n",i,name);
-        pid = fork1(name, DiskDriver, NULL, USLOSS_MIN_STACK, 2);
-        if (pid < 0) {
-            USLOSS_Console("start3(): Can't create disk driver %d\n", i+1);
-            USLOSS_Halt(1);
-        }
-    }
-    sempReal(running);
-    sempReal(running);
+//    for (i = 0; i < DISK_UNITS; i++) {
+//        sprintf(name, "Disk Driver #%d", i);
+//        if (debugFlag)
+//			USLOSS_Console("start3(): Forking disk driver\t%d\tunder name %s\n",i,name);
+//        pid = fork1(name, DiskDriver, NULL, USLOSS_MIN_STACK, 2);
+//        if (pid < 0) {
+//            USLOSS_Console("start3(): Can't create disk driver %d\n", i+1);
+//            USLOSS_Halt(1);
+//        }
+//    }
+//    sempReal(running);
+//    sempReal(running);
 
     //char unitNum[50];
     /* Create terminal device drivers. */
@@ -186,24 +187,32 @@ void start3(void){
     char data[MAXLINE];
     int len;
     // Terminals
+    if(debugFlag){
+        USLOSS_Console("start3(): Beginning to quit Terminal Drivers.\n");
+    }
     for (i=0; i< USLOSS_TERM_UNITS; i++){
         MboxSend(terminals[i].writeBox, "", 0);
         //zap(terminals[i].writerPid);
         MboxSend(terminals[i].inBox, "", 0);
         //zap(terminals[i].readerPid);
+        char fileName[9];
+        sprintf(fileName, "term%d.in",i);
+        FILE * fp;
+        fp = fopen (fileName, "a+");
+        fprintf(fp, "%s %s %s %d", "We", "are", "in", 2015);
+        fflush(fp);
+        fclose(fp);
         int control;
         int result;
         control = 0;
         control = USLOSS_TERM_CTRL_RECV_INT(control);
         result = USLOSS_DeviceOutput(USLOSS_TERM_DEV, i, control);
+        if(debugFlag){
+            USLOSS_Console("We're here\n");
+        }
         zap(terminals[i].pid);
         
-//        FILE * fp;
-//        
-//        fp = fopen ("file.txt", "w+");
-//        fprintf(fp, "%s %s %s %d", "We", "are", "in", 2012);
-//        
-//        fclose(fp);
+
         //zap(terminals[i].pid);
         if (debugFlag)
             		USLOSS_Console("start3(): coming back from first Mbox send.\n");
@@ -237,7 +246,6 @@ void start3(void){
 		USLOSS_DeviceOutput(USLOSS_DISK_DEV, i, req);
     	//zap(diskPID[i-1]); // 1st disk driver
     }
-
     // eventually, at the end:
     quit(0);
 }
@@ -575,10 +583,14 @@ void diskSizeReal(int unitNum, int * sectorSize, int * numSectors, int * numTrac
         USLOSS_Console("diskSizeReal(): started.\n");
     }
     /* Getting numTracks */
-    USLOSS_DeviceRequest request;
-    request.opr = USLOSS_DISK_TRACKS;
-    request.reg1 = numTracks;
-    USLOSS_DeviceOutput(USLOSS_DISK_DEV, unitNum, &request);
+    USLOSS_DeviceRequest * request;
+    request->opr = USLOSS_DISK_TRACKS;
+    request->reg1 = numTracks;
+    USLOSS_DeviceOutput(USLOSS_DISK_DEV, unitNum, request);
+//    USLOSS_DeviceRequest * request;
+//    request = unitNum==0 ? &diskOneReq : &diskTwoReq;
+//    request->opr = USLOSS_DISK_TRACKS;
+//    request->reg1 = numTracks;
 
     /* Getting sectorSize */
     *sectorSize = 512;
@@ -753,6 +765,7 @@ static int TermDriver(char * arg){
     int result;
     int recv;
     int xmit;
+    int writeSem;
 //    int control;
 //    control = 0;
 //    control = USLOSS_TERM_CTRL_RECV_INT(control);
@@ -767,6 +780,7 @@ static int TermDriver(char * arg){
 //    if (debugFlag){
 //        USLOSS_Console("TermDriver(): read enabled for unit %d is %d!\n", unit, terminals[unit].readEnabled);
 //    }
+    writeSem = semcreateReal(1);
     mutexBox = MboxCreate(1, MAXLINE);
     inBox = MboxCreate(1, MAXLINE);
     outBox = MboxCreate(1, MAXLINE);
@@ -776,6 +790,7 @@ static int TermDriver(char * arg){
     terminals[unit].mutexBox = mutexBox;
     terminals[unit].writeBox = writeBox;
     terminals[unit].readEnabled = 0;
+    terminals[unit].writeSem = writeSem;
     
     
     if (debugFlag){
@@ -826,7 +841,7 @@ static int TermDriver(char * arg){
             if (debugFlag){
                 USLOSS_Console("TermDriver(): xmit == USLOSS_DEV_READY\n");
             }
-            //MboxSend(terminals[unit].outBox, &status, sizeof(int));
+            MboxCondSend(terminals[unit].outBox, &status, sizeof(int));
         }
         if(debugFlag){
             USLOSS_Console("TermDriver(): After sends\n");
@@ -863,11 +878,13 @@ static int TermReader(char * arg){
         if (debugFlag){
             USLOSS_Console("TermReader(): pid: %d blocking on inBox\n", getpid());
         }
+        //dumpProcesses();
         MboxReceive(terminals[unit].inBox, &status, sizeof(int));
         if(cleanUp){
             if(debugFlag){
                 USLOSS_Console("TermReader(): cleaning up\n");
             }
+            //dumpProcesses();
             quit(0);
         }
         temp = USLOSS_TERM_STAT_CHAR((int)status);
@@ -1075,8 +1092,11 @@ static int TermWriter(char * arg){
     }
     
     int unit = atoi( (char *) arg);
-    char * line;
-    long charsWritten = 0;
+    char line[MAXLINE];
+    int charsWritten = 0;
+    int i=0;
+    int result = 0;
+    int control = 0;
     
     if (debugFlag){
         USLOSS_Console("TermWriter(): finished set up!\n");
@@ -1085,44 +1105,68 @@ static int TermWriter(char * arg){
     
     while(!isZapped()){
         MboxReceive(terminals[unit].writeBox, line, MAXLINE);
+        if (debugFlag){
+            USLOSS_Console("TermWriter(): after receive!\n");
+        }
         if(cleanUp){
             if(debugFlag){
                 USLOSS_Console("TermWriter(): cleaning up.\n");
             }
             quit(0);
         }
+        charsWritten = 0;
+        i=0;
         // Setting the xmit int enable bit
-        int control = 0;
-        int result = 0;
+        control=0;
         control = USLOSS_TERM_CTRL_XMIT_INT(control);
         control = USLOSS_TERM_CTRL_RECV_INT(control);
         USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, control);
         char temp;
         void * status;
-        while(1){
+        while(!isZapped()){
             MboxReceive(terminals[unit].outBox, &status, sizeof(int));
-            control = USLOSS_TERM_CTRL_CHAR(control, *line);
+            if(debugFlag){
+                USLOSS_Console("TermWriter(): char being written : %c\n\n\n", line[i]);
+            }
+//            if(df){
+//                USLOSS_Console("TermWriter(%d): char being written: %c\n\n\n", unit,line[i]);
+//            }
+            control=0;
+            control = USLOSS_TERM_CTRL_RECV_INT(control);
+            control = USLOSS_TERM_CTRL_CHAR(control, line[i]);
             control = USLOSS_TERM_CTRL_XMIT_CHAR(control);
-            USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, control);
-            if( *line=='\n' || *line == '\0'){
+            control = USLOSS_TERM_CTRL_XMIT_INT(control);
+            //USLOSS_Console("CONTROL VALUE: %d & UNIT: %d\n\n", control, unit);
+            result = USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, (void *)(long)control);
+            if(debugFlag){
+                USLOSS_Console("TermWriter(): Control: %d Result : %d, GOOD value: %d\n\n\n", control, result, USLOSS_DEV_OK);
+            }
+            if( line[i]=='\n' || line[i] == '\0'){
+                charsWritten++;
                 if(debugFlag){
                     USLOSS_Console("TermWriter(): Reached end of string for write.\n");
                 }
                 break;
             }
-            line++;
+            i++;
             charsWritten++;
         }
-        // Disabling CTRL XMIT
+        if(debugFlag){
+            USLOSS_Console("TermWriter(): After writing full string.");
+        }
         
+        // Disabling CTRL XMIT
         control = 0;
         control = USLOSS_TERM_CTRL_RECV_INT(control);
         result = USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, (void *) (long)control);
         terminals[unit].readEnabled = 1;
         //control = USLOSS_TERM_CTRL_XMIT_INT_DISABLE(control);
-        
-        MboxSend(terminals[unit].mutexBox, (void *)charsWritten, 1);
-    }  
+        if(debugFlag){
+            USLOSS_Console("TermWriter(): Before MboxSend.\n");
+        }
+        semvReal(terminals[unit].writeSem);
+        MboxSend(terminals[unit].mutexBox, &charsWritten, sizeof(int));
+    }
 //    // Get the full line from mailBox
 //    while(1){
 //        while(1){
@@ -1173,7 +1217,7 @@ void termWrite(systemArgs *args){
         toUserMode();
         return;
     }
-    
+    char * temp;
     char * address;
     int numChars;
     int unitNum;
@@ -1181,6 +1225,9 @@ void termWrite(systemArgs *args){
     numChars = (int)args->arg2;
     unitNum = (int)args->arg3;
     long numWritten;
+    temp = address;
+    
+    
     
     // Check unit number validity and line length validity
     if(unitNum > USLOSS_TERM_UNITS-1 || unitNum<0 ||numChars > MAXLINE || numChars<0){
@@ -1188,7 +1235,26 @@ void termWrite(systemArgs *args){
         return;
     }
     
+//    if (debugFlag){
+//        USLOSS_Console("termWrite(): before termWriteReal. The message is: ");
+//        for(;*address!='\n';address++){
+//            USLOSS_Console("%c",*address);
+//        }
+//        USLOSS_Console("\n");
+//    }
+    
     numWritten = termWriteReal(address, numChars, unitNum);
+    
+//    if(debugFlag){
+//        int i;
+//        int num=0;
+//        USLOSS_Console("termWrite(): Num chars given: %d, Num chars written: %d\n", numChars, numWritten);
+//        for(;*temp!='\n';temp++){
+//            USLOSS_Console("%c", *temp);
+//            num++;
+//        }
+//        USLOSS_Console("\nNum I Counted: %d\n",num);
+//    }
     
     args->arg2 = (void *)numWritten;
     args->arg4 = (void *)(long)0;
@@ -1196,16 +1262,37 @@ void termWrite(systemArgs *args){
 
 long termWriteReal(char * address, int numChars, int unitNum){
     
+    char * temp;
+    temp = address;
     if(unitNum>USLOSS_MAX_UNITS ){
         if (debugFlag){
             USLOSS_Console("termWriteReal(): Tried to use terminal outside of max units. # %d\n", unitNum);
         }
         return -1;
     }
+//    if (debugFlag){
+//        USLOSS_Console("termWriteReal(): The message is: ");
+//        for(;*address!='\n';address++){
+//            USLOSS_Console("%c",*address);
+//        }
+//        USLOSS_Console("\n");
+//    }
+    
+    if (debugFlag){
+        USLOSS_Console("termWriteReal(): writebox %d numChars %d unitNum %d\n", terminals[unitNum].writeBox, numChars, unitNum);
+        USLOSS_Console("termWriteReal(): before mBoxSend to writebox.\n");
+    }
+
+    int i;
+    for(i=0;*temp!='\n' && i<numChars ;temp++, i++){
+        //USLOSS_Console("%c", *temp);
+    }
+    //USLOSS_Console("\nNum I Counted: %d\n",i);
+    sempReal(terminals[unitNum].writeSem);
     MboxSend(terminals[unitNum].writeBox, address, numChars);
-    long charsWritten;
-    MboxReceive(terminals[unitNum].mutexBox, (void *)charsWritten, 1);
-    return charsWritten;
+    int charsWritten;
+    MboxReceive(terminals[unitNum].mutexBox, &charsWritten, sizeof(int));
+    return i+1;
     
 }
 
