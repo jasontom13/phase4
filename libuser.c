@@ -8,7 +8,7 @@
 
 #include "libuser.h"
 #include <phase1.h>
-#include <phase2.h>
+#include <phase4.h>
 #include <usyscall.h>
 #include <usloss.h>
 
@@ -32,6 +32,16 @@ int TermWrite(char * buffer, int strlen, int unitNum, int *length){
     USLOSS_Syscall(&sysArg);
     *length = (int) sysArg.arg2;
     return (int) sysArg.arg4;
+}
+
+void DiskSize(int unit, int * sectorSize, int *trackSize, int *diskSize){
+    systemArgs sysArg;
+    sysArg.number = SYS_DISKSIZE;
+    sysArg.arg1 = unit;
+    USLOSS_Syscall(&sysArg);
+    *sectorSize = (int) sysArg.arg1;
+    *trackSize = (int) sysArg.arg2;
+    *diskSize  = (int) sysArg.arg3;
 }
 
 int DiskRead(void *diskBuffer, int unit, int track, int first, int sectors, int *status){

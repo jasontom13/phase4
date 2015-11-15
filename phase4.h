@@ -9,6 +9,18 @@
  * Maximum line length
  */
 
+/*
+ * Maximum number of processes.
+ */
+
+#define MAXPROC      50
+
+/*
+ * Maximum length of a process name
+ */
+
+#define MAXNAME      50
+
 #define INACTIVE		0
 #define ACTIVE			1
 #define MAXLINE         80
@@ -27,13 +39,25 @@ extern  int  DiskRead (void *diskBuffer, int unit, int track, int first,
                        int sectors, int *status);
 extern  int  DiskWrite(void *diskBuffer, int unit, int track, int first,
                        int sectors, int *status);
-extern  int  DiskSize (int unit, int *sector, int *track, int *disk);
+extern  void  DiskSize (int unit, int *sector, int *track, int *disk);
 extern  int  TermRead (char *buffer, int bufferSize, int unitID,
                        int *numCharsRead);
 extern  int  TermWrite(char *buffer, int bufferSize, int unitID,
                        int *numCharsRead);
 
 extern  int  start4(char *);
+
+typedef struct systemArgs
+{
+    int number;
+    void *arg1;
+    void *arg2;
+    void *arg3;
+    void *arg4;
+    void *arg5;
+} systemArgs;
+//
+extern void (*systemCallVec[])(systemArgs *args);
 
 struct ProcStruct {
     int pid;
@@ -58,6 +82,8 @@ struct Terminal {
     int writeBox;
     int mutexBox;
     int readEnabled;
+    int writeSem;
+    int active;
 } Terminal;
 
 struct diskProc {
