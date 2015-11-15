@@ -8,7 +8,7 @@
 
 #include "libuser.h"
 #include <phase1.h>
-#include <phase2.h>
+#include <phase4.h>
 #include <usyscall.h>
 #include <usloss.h>
 
@@ -62,7 +62,7 @@ int DiskRead(void *diskBuffer, int unit, int track, int first, int sectors, int 
 int DiskWrite(void *diskBuffer, int unit, int track, int first, int sectors, int *status){
 	// populate the sysargs struct;
 	systemArgs sysArg;
-	sysArg.number = SYS_DISKREAD;
+	sysArg.number = SYS_DISKWRITE;
 	sysArg.arg1 = diskBuffer;
 	sysArg.arg2 = sectors;
 	sysArg.arg3 = track;

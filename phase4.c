@@ -1,6 +1,6 @@
 #include "usloss.h"
 #include "phase1.h"
-#include <phase2.h>
+#include "phase2.h"
 #include <phase3.h>
 #include <phase4.h>
 #include <stdlib.h> /* needed for atoi() */
@@ -54,7 +54,7 @@ int running;
 int debugFlag = 0;
 int df = 1;
 char * dummyMsg;
-int cleanUp=0;
+int cleanUp;
 /* ------------------------------------------------------------------------ */
 
 void start3(void){
@@ -67,6 +67,7 @@ void start3(void){
     int		status;
     /* Check kernel mode here. */
 
+    cleanUp = 0;
     /* initialize proctable */
     for(i = getpid(); i < MAXPROC; i++){
     	pFourProcTable[i].status = INACTIVE;
@@ -119,19 +120,21 @@ void start3(void){
     diskTwoMutex = semcreateReal(1);
     diskTwoQueue = semcreateReal(0);
 
+    for (i = 0; i < DISK_UNITS; i++) {
+        sprintf(name, "Disk Driver #%d", i);
+        sprintf(termbuf, "%d",i);
+        if (debugFlag)
+			USLOSS_Console("start3(): Forking disk driver\t%d\tunder name %s\n",i,name);
+        diskPID[i] = fork1(name, DiskDriver, termbuf, USLOSS_MIN_STACK, 2);
+        if (diskPID[i] < 0) {
+            USLOSS_Console("start3(): Can't create disk driver %d\n", i+1);
+            USLOSS_Halt(1);
+        }
+    }
+    sempReal(running);
+    sempReal(running);
+    //dumpProcesses();
 
-//    for (i = 0; i < DISK_UNITS; i++) {
-//        sprintf(name, "Disk Driver #%d", i);
-//        if (debugFlag)
-//			USLOSS_Console("start3(): Forking disk driver\t%d\tunder name %s\n",i,name);
-//        pid = fork1(name, DiskDriver, NULL, USLOSS_MIN_STACK, 2);
-//        if (pid < 0) {
-//            USLOSS_Console("start3(): Can't create disk driver %d\n", i+1);
-//            USLOSS_Halt(1);
-//        }
-//    }
-//    sempReal(running);
-//    sempReal(running);
 
     //char unitNum[50];
     /* Create terminal device drivers. */
@@ -207,10 +210,11 @@ void start3(void){
         control = 0;
         control = USLOSS_TERM_CTRL_RECV_INT(control);
         result = USLOSS_DeviceOutput(USLOSS_TERM_DEV, i, control);
-        if(debugFlag){
-            USLOSS_Console("We're here\n");
+
+        if(terminals[i].active){
+            zap(terminals[i].pid);
         }
-        zap(terminals[i].pid);
+
         
 
         //zap(terminals[i].pid);
@@ -233,19 +237,7 @@ void start3(void){
     if (debugFlag)
     		USLOSS_Console("start3(): zapping clock driver.\n");
     zap(clockPID);  // clock driver
-    if (debugFlag)
-        		USLOSS_Console("start3(): zapping disk drivers.\n");
-    struct USLOSS_DeviceRequest * req;
-    for(i = 1; i <= USLOSS_DISK_UNITS; i++){
-    	if(i == 0)
-    			req = &diskOneReq;
-    		else
-    			req = &diskTwoReq;
-    	req->opr = USLOSS_DISK_SEEK;
-		req->reg1 = 1;
-		USLOSS_DeviceOutput(USLOSS_DISK_DEV, i, req);
-    	//zap(diskPID[i-1]); // 1st disk driver
-    }
+
     // eventually, at the end:
     quit(0);
 }
@@ -410,7 +402,7 @@ void clockWaiterAdd(int pid, int seconds){
    ----------------------------------------------------------------------- */
 void DiskDriver(char *arg)
 {
-	int result, status, unit, procPID;
+	int result, status, unit, procMbox;
 	int armPointer;
 	int diskMutex;
 	int diskWaitSem;
@@ -421,12 +413,11 @@ void DiskDriver(char *arg)
     unit = atoi( (char *) arg); 	// Unit is passed as arg.
     // set pointers to the queue, the arm, and the mutex sem
     if(unit == 0){
-    	q = diskOneHead;
     	diskMutex = diskOneMutex;
     	diskWaitSem = diskOneQueue;
     	req = &diskOneReq;
     }else{
-    	q = diskTwoHead;
+    	if (debugFlag) USLOSS_Console("DiskDriver(): bah\n");
     	diskMutex = diskTwoMutex;
     	diskWaitSem = diskTwoQueue;
     	req = &diskTwoReq;
@@ -435,59 +426,84 @@ void DiskDriver(char *arg)
     armPointer = USLOSS_DISK_TRACK_SIZE / 2;
 
     // v the semaphore so that the system knows that the diskdriver is running
-    if (debugFlag)
-		USLOSS_Console("DiskDriver(): diskDriver %d started\n", unit);
+    if (debugFlag) USLOSS_Console("DiskDriver(): diskDriver %d started\n", unit);
     semvReal(running);
 
     // infinite loop until the disk proc is zapped!
     while(!isZapped()){
-    	if (debugFlag)
-			USLOSS_Console("DiskDriver(): waiting on semaphore\n");
+    	if (debugFlag) USLOSS_Console("DiskDriver(): %d waiting on semaphore\n", unit);
     	// perform p operation on semaphore to wait for uploads
     	sempReal(diskWaitSem);
-    	if (debugFlag)
-			USLOSS_Console("DiskDriver(): Checking for cleanup\n");
+    	if (debugFlag) USLOSS_Console("DiskDriver(): free from sem\n");
+    	if(unit == 0) q = diskOneHead;
+		else q = diskTwoHead;
+    	if(debugFlag) USLOSS_Console("DiskDriver(): returned from sem; diskOneHead == NULL?: %d\ndiskTwoHead == NULL?: %d\nq == NULL?: %d\n", diskOneHead == NULL, diskTwoHead == NULL, q == NULL);
     	// check if process should quit
-    	if(cleanUp)
+    	if(cleanUp){
+    		if (debugFlag) USLOSS_Console("DiskDriver(): ARG\n");
     		quit(0);
-    	if (debugFlag)
-			USLOSS_Console("DiskDriver(): entering mutex\n");
+    	}
+    	if (debugFlag) USLOSS_Console("DiskDriver(): entering mutex\n");
     	// enter mutex
 		sempReal(diskMutex);
 		// if the current arm position is different from the operation track, seek to the requested track
 		if(armPointer != q->track){
+
+			if (debugFlag) USLOSS_Console("DiskDriver(): making system call to seek\n");
+
 			req->opr = USLOSS_DISK_SEEK;
 			req->reg1 = q->track;
+
+			if (debugFlag) USLOSS_Console("DiskDriver(): issuing USLOSS_DeviceOutput opr\n");
+
 			USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, req);
+
+			if (debugFlag) USLOSS_Console("DiskDriver(): waiting on disk device\n");
+
 			result = waitDevice(USLOSS_DISK_DEV, unit, &status);
+
+			if (debugFlag) USLOSS_Console("DiskDriver(): returned from wait on disk dev; result = %d\n", result);
+
 			if (result != 0)
 				return;
 			armPointer = q->track;
 		}
+		if (debugFlag)
+			USLOSS_Console("DiskDriver(): ready to execute first process\n");
 		// execute the first process on the queue
 		switch(q->type){
 			case USLOSS_DISK_READ:
+				if (debugFlag) USLOSS_Console("DiskDriver(): diskReadReal\n");
 				result = diskReadReal(q->unit, q->track, q->first, q->sectors, q->buffer);
 				break;
 			case USLOSS_DISK_WRITE:
+				if (debugFlag) USLOSS_Console("DiskDriver(): diskWriteReal\nbuffer == NULL?: %d\n", q->buffer == NULL);
 				result = diskWriteReal(q->unit, q->track, q->first, q->sectors, q->buffer);
 				break;
 			default:
 				break;
 		}
-		// if something went wrong with the process
+		// place the result into the first arg and
+		if(result == -1){
+			q->args->arg4 = -1;
+		}else{
+			q->args->arg1 = result;
+			q->args->arg4 = 0;
+		}
 
 		//remove the first proc from the queue and exit mutex
-		procPID = q->pid;
-		q->pid = DISKPROCEMPTY;
+		procMbox = pFourProcTable[q->pid % MAXPROC].procMbox;
 		if(unit == 0)
 			diskOneHead = diskOneHead->next;
 		else
 			diskTwoHead = diskTwoHead->next;
+		if (debugFlag) USLOSS_Console("DiskDriver(): shifted head value\n");
 		// exit mutex
 		semvReal(diskMutex);
+		if (debugFlag) USLOSS_Console("DiskDriver(): exited mutex\n");
 		// awaken the process
-		MboxCondSend(procPID, dummyMsg, NULL);
+		if (debugFlag) USLOSS_Console("DiskDriver(): sending return value to mbox\n");
+		MboxCondSend(procMbox, dummyMsg, 0);
     }
     // once zapped, quit
     quit(0);
@@ -505,8 +521,9 @@ void DiskDriver(char *arg)
    Side Effects	- none
    ----------------------------------------------------------------------- */
 int diskReadReal(int unit, int track, int first, int sectors, void *buffer){
+	if (debugFlag) USLOSS_Console("diskReadReal(): starting\n");
 	struct USLOSS_DeviceRequest * req;
-	char *fetch[USLOSS_DISK_SECTOR_SIZE];
+	char *fetch;
 	int result, status;
 
 	// if any of the arguments passed have illegal values, set arg4 to -1 and return
@@ -514,30 +531,30 @@ int diskReadReal(int unit, int track, int first, int sectors, void *buffer){
 		return(-1);
 
 	// select the correct global request object
+	if (debugFlag) USLOSS_Console("diskReadReal(): selecting the request\n");
 	if(unit == 0)
 		req = &diskOneReq;
 	else
 		req = &diskTwoReq;
-	/* if the current arm position is different from the operation track, seek to the requested track
-	if(*armPointer != q->track){
-		req->opr = USLOSS_DISK_SEEK;
-		req->reg1 = q->track;
-		USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, req);
-		*armPointer = q->track;
-	}*/
+
 	req->opr = USLOSS_DISK_READ;
 	int iter;
+
+	if (debugFlag) USLOSS_Console("diskReadReal(): set up to do read loop\n");
 	for(iter = 0; iter < sectors; iter++){
 		req->reg1 = first + iter;
-		req->reg2 = fetch;
+		req->reg2 = buffer + (iter*512);
 		USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, req);
 		result = waitDevice(USLOSS_DISK_DEV, unit, &status);
+		// if (debugFlag) USLOSS_Console("diskReadReal(): fetch = %s\n",fetch);
 		if (result != 0)
-			return status;
-		if(status & USLOSS_DEV_READY){
-			memcpy(buffer + iter*512, fetch,512);
+			return(status);
+		//memcpy(buffer + iter*512, fetch,512);
+		if (debugFlag){
+			USLOSS_Console("diskReadReal(): buffer = %s\n",buffer);
 		}
 	}
+	return(0);
 }
 
 /* ------------------------------------------------------------------------
@@ -552,6 +569,7 @@ int diskReadReal(int unit, int track, int first, int sectors, void *buffer){
    Side Effects	- none
    ----------------------------------------------------------------------- */
 int diskWriteReal(int unit, int track, int first, int sectors, void *buffer){
+	if (debugFlag) USLOSS_Console("diskWrite(): started\n");
 	struct USLOSS_DeviceRequest * req;
 	char *fetch[USLOSS_DISK_SECTOR_SIZE];
 	int result, status;
@@ -559,23 +577,30 @@ int diskWriteReal(int unit, int track, int first, int sectors, void *buffer){
 	// if any of the arguments passed have illegal values, set arg4 to -1 and return
 	if(first < 0 || first > USLOSS_DISK_TRACK_SIZE || sectors <= 0 || sectors > USLOSS_DISK_TRACKS)
 		return(-1);
+	if (debugFlag) USLOSS_Console("diskWrite(): setting request pointer\n");
 	// select the correct global request object
 	if(unit == 0)
 			req = &diskOneReq;
 		else
 			req = &diskTwoReq;
 	int iter;
+	if (debugFlag) USLOSS_Console("diskWrite(): prepare to write into disk\n");
 	for(iter = 0; iter < sectors; iter++){
+		req->opr = USLOSS_DISK_WRITE;
 		req->reg1 = first + iter;
 		memcpy(fetch, buffer + iter*512 ,512);
 		req->reg2 = fetch;
+		if (debugFlag) USLOSS_Console("diskWrite(): writing into disk\n");
 		USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, req);
 		result = waitDevice(USLOSS_DISK_DEV, unit, &status);
 		if (result != 0){
 			return(status);
 		}
-
+//		if(debugFlag){
+//			req->opr = US
+//		}
 	}
+	return(0);
 }
 
 void diskSizeReal(int unitNum, int * sectorSize, int * numSectors, int * numTracks){
@@ -612,8 +637,7 @@ void diskSizeReal(int unitNum, int * sectorSize, int * numSectors, int * numTrac
    Side Effects	- none
    ----------------------------------------------------------------------- */
 void diskRead(systemArgs *args){
-	if (debugFlag)
-		USLOSS_Console("diskRead(): started\n");
+	if (debugFlag) USLOSS_Console("diskRead(): started\n");
 	/* Contents of the argument object as follows:
 	 * sysArg.arg1 = diskBuffer;
 	 * sysArg.arg2 = sectors;
@@ -621,27 +645,20 @@ void diskRead(systemArgs *args){
 	 * sysArg.arg4 = first;
 	 * sysArg.arg5 = unit;
 	*/
-	char *msg;
 	// read the information from the unit
-	if (debugFlag)
-		USLOSS_Console("diskRead(): queueing the disk process object\n");
+	if (debugFlag) USLOSS_Console("diskRead(): queueing the disk process object\n");
 	diskQueue(USLOSS_DISK_READ, args->arg5, args, getpid());
-	if (debugFlag)
-			USLOSS_Console("diskRead():performing sem operation ");
+	if (debugFlag) USLOSS_Console("diskRead():performing sem operation ");
 	// perform a v operation on the appropriate semaphore
 	if(args->arg5 == 0){
-		if (debugFlag)
-				USLOSS_Console("on sem One\n");
 		semvReal(diskOneQueue);
 	}else{
-		if (debugFlag)
-			USLOSS_Console("on sem Two\n");
+		if (debugFlag) USLOSS_Console("on sem Two\n");
 		semvReal(diskTwoQueue);
 	}
-	if (debugFlag)
-		USLOSS_Console("diskRead(): queueing finished, performing receive on proc mbox\n");
+	if (debugFlag) USLOSS_Console("diskRead(): queueing finished, performing receive on proc mbox\n");
 	// block on the process mbox until it returns
-	MboxReceive(pFourProcTable[getpid() % MAXPROC].procMbox, msg, 0);
+	MboxReceive(pFourProcTable[getpid() % MAXPROC].procMbox, dummyMsg, 0);
 }
 
 /* ------------------------------------------------------------------------
@@ -652,8 +669,8 @@ void diskRead(systemArgs *args){
    Side Effects	- none
    ----------------------------------------------------------------------- */
 void diskWrite(systemArgs *args){
-	if (debugFlag)
-		USLOSS_Console("diskWrite(): started\n");
+	if (debugFlag) USLOSS_Console("diskWrite(): started\n");
+
 	/* Contents of the argument object as follows:
 	 * sysArg.arg1 = diskBuffer;
 	 * sysArg.arg2 = sectors;
@@ -662,10 +679,13 @@ void diskWrite(systemArgs *args){
 	 * sysArg.arg5 = unit;
 	*/
 	char *msg;
+
 	// read the information from the unit
+	if (debugFlag) USLOSS_Console("diskWrite(): queuing the operation\n");
 	diskQueue(USLOSS_DISK_WRITE, args->arg5, args, getpid());
-	if (debugFlag)
-			USLOSS_Console("diskWrite(): queueing finished, performing receive on proc mbox\n");
+
+	if (debugFlag) USLOSS_Console("diskWrite(): queueing finished, performing receive on proc mbox\n");
+
 	// perform a v operation on the appropriate semaphore
 	if(args->arg5 == 0)
 		semvReal(diskOneQueue);
@@ -673,27 +693,34 @@ void diskWrite(systemArgs *args){
 		semvReal(diskTwoQueue);
 	// wait on personal mbox until done
 	MboxReceive(pFourProcTable[getpid() % MAXPROC].procMbox, msg, 0);
-	// place important values in the respective registers
 }
 
 // sorts a process onto the appropriate disk queue in circular scan ordering
 void diskQueue(int opr, int unit, systemArgs *args, int pid){
+	if (debugFlag) USLOSS_Console("diskQueue(): started.\n");
 	struct diskProc * target;
 	int * armPos;
 	// select the target queue
-	if(unit == 1){
+	if (debugFlag) USLOSS_Console("diskQueue(): selecting target queue;");
+	if(unit == 0){
+		if (debugFlag) USLOSS_Console(" queue One selected.\n");
 		target = diskOneHead;
 		armPos = &diskOneArmPos;
 	}else{
+		if (debugFlag) USLOSS_Console(" queue Two selected.\n");
 		target = diskTwoHead;
 		armPos = &diskTwoArmPos;
 	}
 	/* insert disk opr request based on position of arm and other process requests */
 	// if there are no items currently on the head, insert
-	if(target == NULL)
-		diskOneHead = diskQueueHelper(unit,opr,args,pid,NULL);
+	if(target == NULL){
+		if (debugFlag) USLOSS_Console("diskQueue(): empty queue; inserting into head.\n");
+		if(unit == 0)
+			diskOneHead = diskQueueHelper(unit,opr,args,pid,NULL);
+		else
+			diskTwoHead = diskQueueHelper(unit,opr,args,pid,NULL);
 	// otherwise, find the position where the new node will fit
-	else{
+	}else{
 		// if the requested disk proc is less than the current arm position, place the new proc after all those that are after it
 		if(args->arg3 < *armPos)
 			// first track past the processes that are located at or after the arm position
@@ -725,6 +752,8 @@ struct diskProc *  diskQueueHelper(int unit, int opr, systemArgs *args, int pid,
 	target->track = args->arg3;
 	target->sectors = args->arg2;
 	target->first = args->arg4;
+	target->buffer = args->arg1;
+	target->args = args;
 	target->next = next;
 	return target;
 }
@@ -791,6 +820,7 @@ static int TermDriver(char * arg){
     terminals[unit].writeBox = writeBox;
     terminals[unit].readEnabled = 0;
     terminals[unit].writeSem = writeSem;
+    terminals[unit].active = 1;
     
     
     if (debugFlag){
@@ -811,12 +841,14 @@ static int TermDriver(char * arg){
             if(debugFlag){
                 USLOSS_Console("TermDriver(): The result was not equal to zero, quitting..\n");
             }
+            terminals[unit].active = 0;
             quit(0);
         }
         if(cleanUp){
             if(debugFlag){
                 USLOSS_Console("TermDriver(): cleaning up unit %d.\n", unit);
             }
+            terminals[unit].active = 0;
             quit(0);
         }
 
